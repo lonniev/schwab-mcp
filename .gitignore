@@ -12,3 +12,4 @@ token.json
 .ruff_cache/
 .pytest_cache/
 .mypy_cache/
+.mcp.json
