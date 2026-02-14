@@ -17,8 +17,17 @@ from tools.options import get_option_chain as _get_option_chain
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
     """Initialize the Schwab client on server startup."""
-    client = create_client()
-    account_hash = get_schwab_account_hash()
+    import logging
+
+    log = logging.getLogger(__name__)
+    try:
+        client = create_client()
+        account_hash = get_schwab_account_hash()
+        log.info("Schwab client initialized successfully.")
+    except (EnvironmentError, OSError) as e:
+        log.warning("Schwab credentials not configured: %s. Tools will return errors.", e)
+        client = None
+        account_hash = None
     try:
         yield {"schwab_client": client, "account_hash": account_hash}
     finally:
@@ -26,6 +35,20 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
 
 
 mcp = FastMCP("Schwab MCP", lifespan=app_lifespan)
+
+_NO_CREDS = (
+    "Schwab API credentials are not configured. "
+    "Set SCHWAB_CLIENT_ID, SCHWAB_CLIENT_SECRET, SCHWAB_TOKEN_JSON, "
+    "and SCHWAB_ACCOUNT_HASH environment variables."
+)
+
+
+def _require_client(ctx: Context):
+    client = ctx.lifespan_context.get("schwab_client")
+    account_hash = ctx.lifespan_context.get("account_hash")
+    if client is None:
+        return None, None
+    return client, account_hash
 
 
 @mcp.tool()
@@ -36,16 +59,18 @@ async def get_positions(ctx: Context) -> str:
     Options positions are automatically paired into spreads where possible,
     displaying credit received, max loss, current value, and P&L.
     """
-    client = ctx.lifespan_context["schwab_client"]
-    account_hash = ctx.lifespan_context["account_hash"]
+    client, account_hash = _require_client(ctx)
+    if client is None:
+        return _NO_CREDS
     return _get_positions(client, account_hash)
 
 
 @mcp.tool()
 async def get_balances(ctx: Context) -> str:
     """Get account balances: cash, buying power, net liquidation value, and day P&L."""
-    client = ctx.lifespan_context["schwab_client"]
-    account_hash = ctx.lifespan_context["account_hash"]
+    client, account_hash = _require_client(ctx)
+    if client is None:
+        return _NO_CREDS
     return _get_account_balances(client, account_hash)
 
 
@@ -56,7 +81,9 @@ async def get_quote(symbols: str, ctx: Context) -> str:
     Args:
         symbols: Comma-separated ticker symbols (e.g. "AAPL,MSFT,TSLA").
     """
-    client = ctx.lifespan_context["schwab_client"]
+    client, _ = _require_client(ctx)
+    if client is None:
+        return _NO_CREDS
     return _get_quote(client, symbols)
 
 
@@ -79,7 +106,9 @@ async def get_option_chain(
         contract_type: "ALL", "CALL", or "PUT".
         days_to_expiration: Maximum days to expiration to include.
     """
-    client = ctx.lifespan_context["schwab_client"]
+    client, _ = _require_client(ctx)
+    if client is None:
+        return _NO_CREDS
     return _get_option_chain(client, symbol, strike_count, contract_type, days_to_expiration)
 
 
@@ -101,7 +130,9 @@ async def get_price_history(
         frequency_type: "minute", "daily", "weekly", or "monthly".
         frequency: Frequency interval.
     """
-    client = ctx.lifespan_context["schwab_client"]
+    client, _ = _require_client(ctx)
+    if client is None:
+        return _NO_CREDS
     return _get_price_history(client, symbol, period_type, period, frequency_type, frequency)
 
 
