@@ -30,7 +30,7 @@ All brokerage tools are read-only. No orders are placed.
 
 ## Architecture
 
-- **Multi-tenant**: operator provides `SCHWAB_CLIENT_ID` / `SCHWAB_CLIENT_SECRET` via env vars; each user delivers `token_json` + `account_hash` via Secure Courier (encrypted Nostr DM)
+- **Multi-tenant**: operator delivers `client_id` / `client_secret` via Secure Courier (`service="schwab-operator"`); each user delivers `token_json` + `account_hash` via Secure Courier (`service="schwab"`). No Schwab credentials in env vars
 - **Direct httpx**: thin `SchwabClient` wrapper with bearer auth and proactive token refresh (no third-party Schwab SDK)
 - **Tollbooth DPYC**: pre-funded Lightning balances, Authority-certified purchase orders, NeonVault (Postgres) for ledger persistence
 
@@ -54,14 +54,16 @@ See [`.env.example`](.env.example) for the full list. Key variables:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `SCHWAB_CLIENT_ID` | Yes | Schwab API app key |
-| `SCHWAB_CLIENT_SECRET` | Yes | Schwab API app secret |
 | `SCHWAB_TRADER_API` | No | API base URL (default `https://api.schwabapi.com`) |
 | `TOLLBOOTH_NOSTR_OPERATOR_NSEC` | Yes | Nostr signing key for Secure Courier |
 | `NEON_DATABASE_URL` | Yes | Postgres for NeonVault (ledger + credential persistence) |
 | `BTCPAY_HOST` / `BTCPAY_STORE_ID` / `BTCPAY_API_KEY` | Yes | BTCPay Server for Lightning invoices |
 
-User credentials (`token_json`, `account_hash`) are delivered via Secure Courier — they never appear in env vars or chat.
+All Schwab credentials flow exclusively through Secure Courier:
+- **Operator** delivers `client_id` + `client_secret` via `service="schwab-operator"` (one-time)
+- **Patron** delivers `token_json` + `account_hash` via `service="schwab"` (per-user)
+
+No Schwab secrets ever appear in env vars or chat.
 
 ## Run
 
@@ -83,7 +85,7 @@ curl http://localhost:8000/mcp
 uv run pytest tests/ -v
 ```
 
-48 tests covering all tools, the httpx client, vault, auth, server credit gating, and Secure Courier callbacks.
+50 tests covering all tools, the httpx client, vault, auth, server credit gating, and Secure Courier callbacks.
 
 ## Project Structure
 
@@ -92,7 +94,7 @@ schwab-mcp/
   server.py            # FastMCP server, singletons, credit gating, 12 tool endpoints
   schwab_client.py     # Thin async httpx client — bearer auth + token refresh
   vault.py             # Per-user session management (in-memory cache)
-  auth.py              # User client creation from operator creds + user token
+  auth.py              # CLI bootstrap message (credentials via Secure Courier)
   settings.py          # pydantic-settings (env vars, .env file)
   models.py            # Pydantic response models
   tools/

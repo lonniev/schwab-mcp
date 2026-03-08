@@ -9,9 +9,11 @@ class Settings(BaseSettings):
     """Schwab MCP server settings.
 
     Operator env vars (required):
-        SCHWAB_CLIENT_ID / SCHWAB_CLIENT_SECRET — Schwab OAuth app creds
         TOLLBOOTH_NOSTR_OPERATOR_NSEC — Nostr signing key
         NEON_DATABASE_URL — Postgres for NeonVault
+
+    Schwab API credentials (client_id / client_secret) are delivered
+    via Secure Courier (service="schwab-operator"), NOT env vars.
 
     BTCPay (required for credits):
         BTCPAY_HOST / BTCPAY_STORE_ID / BTCPAY_API_KEY
@@ -23,10 +25,6 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
-
-    # Schwab OAuth app credentials (operator-provided)
-    schwab_client_id: str | None = None
-    schwab_client_secret: str | None = None
 
     # Schwab Trader API base URL (no trailing slash)
     schwab_trader_api: str = "https://api.schwabapi.com"
