@@ -24,12 +24,19 @@ mcp = FastMCP(
         "monetized via DPYC Tollbooth Lightning micropayments.\n\n"
         "## Getting Started\n\n"
         "1. Call `session_status` to check your current session.\n"
-        "2. If no active session, follow the Secure Courier onboarding flow:\n"
-        "   - Get your **patron npub** from the dpyc-oracle's how_to_join() tool — "
-        "this is the npub you registered as a DPYC Citizen, your identity for credit operations\n"
+        "2. **Operator setup** (one-time): The operator delivers Schwab API app "
+        "credentials via Secure Courier with `service='schwab-operator'`:\n"
+        '   - Call `request_credential_channel(service="schwab-operator", '
+        "recipient_npub=<operator_npub>)`\n"
+        '   - Reply with JSON: `{"client_id": "...", "client_secret": "..."}`\n'
+        "   - Call `receive_credentials(sender_npub=<operator_npub>, "
+        'service="schwab-operator")`\n\n'
+        "3. **Patron onboarding** (per-user): Each user delivers their Schwab "
+        "token via Secure Courier with `service='schwab'`:\n"
+        "   - Get your **patron npub** from the dpyc-oracle's how_to_join() tool\n"
         "   - Call `request_credential_channel(recipient_npub=<patron_npub>)` "
         "to receive a welcome DM\n"
-        "   - Reply via your Nostr client with your Schwab credentials in JSON\n"
+        '   - Reply with JSON: `{"token_json": "...", "account_hash": "..."}`\n'
         "   - Call `receive_credentials(sender_npub=<patron_npub>)` to vault your credentials\n\n"
         "## Credits Model\n\n"
         "Tool calls cost api_sats per call. Auth and balance tools are always free. "
@@ -40,6 +47,12 @@ tool = make_slug_tool(mcp, "schwab")
 
 _ONBOARDING_NEXT_STEPS = {
     "action": "secure_courier_onboarding",
+    "operator_setup": (
+        "The operator must first deliver Schwab API app credentials via "
+        'Secure Courier (service="schwab-operator"): '
+        '{"client_id": "...", "client_secret": "..."}. '
+        "This is a one-time setup per deployment."
+    ),
     "step_1": (
         "Ask the user for their **patron npub** (the npub they registered "
         "as a DPYC Citizen). They can get one from the dpyc-oracle's "
@@ -194,6 +207,40 @@ async def _resolve_authority_service_url() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Operator credential cache (delivered via Secure Courier)
+# ---------------------------------------------------------------------------
+
+_operator_credentials: dict[str, str] | None = None
+
+
+async def _ensure_operator_credentials() -> dict[str, str]:
+    """Return cached operator credentials, restoring from vault on cold start.
+
+    Raises ValueError if operator credentials have not been delivered.
+    """
+    global _operator_credentials
+    if _operator_credentials:
+        return _operator_credentials
+
+    # Cold-start: try vault restore via Secure Courier
+    try:
+        operator_npub = _get_operator_npub()
+        courier = _get_courier_service()
+        await courier.receive(operator_npub, service="schwab-operator")
+        # callback fires → sets _operator_credentials
+        if _operator_credentials:
+            return _operator_credentials
+    except Exception:
+        pass
+
+    raise ValueError(
+        "Schwab operator credentials not configured. "
+        "The operator must deliver client_id and client_secret via "
+        "Secure Courier (service='schwab-operator')."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Horizon auth helpers
 # ---------------------------------------------------------------------------
 
@@ -301,12 +348,29 @@ def _resolve_relays(configured: str | None) -> list[str]:
 async def _on_schwab_credentials_received(
     sender_npub: str, credentials: dict[str, str], service: str,
 ) -> dict[str, Any] | None:
-    """Operator callback: activate session after credential receipt via Secure Courier.
+    """Operator callback: handle credentials received via Secure Courier.
 
-    Combines the operator's client_id/secret with the patron's token_json + account_hash,
-    creates an AsyncClient, establishes the in-memory session, and seeds the starter balance.
+    Two services are supported:
+    - "schwab-operator": stores client_id + client_secret in memory (one-time)
+    - "schwab": combines operator creds with patron's token_json + account_hash
+      to create a per-user session
     """
+    global _operator_credentials
     result: dict[str, Any] = {}
+
+    # --- Operator credentials (global, one-time) ---
+    if service == "schwab-operator":
+        if not all(k in credentials for k in ("client_id", "client_secret")):
+            return result
+        _operator_credentials = {
+            "client_id": credentials["client_id"],
+            "client_secret": credentials["client_secret"],
+        }
+        return {"operator_credentials_vaulted": True}
+
+    # --- Patron credentials (per-user) ---
+    if service != "schwab":
+        return result
 
     user_id = _get_current_user_id()
     if not user_id:
@@ -315,20 +379,18 @@ async def _on_schwab_credentials_received(
     if not all(k in credentials for k in ("token_json", "account_hash")):
         return result
 
+    try:
+        op_creds = await _ensure_operator_credentials()
+    except ValueError as e:
+        return {"session_activated": False, "error": str(e)}
+
     settings = _get_settings()
-    if not settings.schwab_client_id or not settings.schwab_client_secret:
-        result["session_activated"] = False
-        result["warning"] = (
-            "Credentials received but operator SCHWAB_CLIENT_ID/SCHWAB_CLIENT_SECRET "
-            "not configured. Session not activated."
-        )
-        return result
 
     from vault import _create_client, set_session
 
     client = _create_client(
-        settings.schwab_client_id,
-        settings.schwab_client_secret,
+        op_creds["client_id"],
+        op_creds["client_secret"],
         credentials["token_json"],
         api_base=settings.schwab_trader_api,
     )
@@ -373,6 +435,15 @@ def _get_courier_service():
     relays = _resolve_relays(settings.tollbooth_nostr_relays)
 
     templates = {
+        "schwab-operator": CredentialTemplate(
+            service="schwab-operator",
+            version=1,
+            fields={
+                "client_id": FieldSpec(required=True, sensitive=True),
+                "client_secret": FieldSpec(required=True, sensitive=True),
+            },
+            description="Schwab API app credentials (operator-provided)",
+        ),
         "schwab": CredentialTemplate(
             service="schwab",
             version=1,
@@ -630,11 +701,14 @@ async def session_status() -> dict[str, Any]:
     from vault import get_dpyc_npub, get_session
 
     user_id = _get_current_user_id()
+    op_status = "configured" if _operator_credentials else "not_configured"
+
     if not user_id:
         return {
             "mode": "stdio",
             "message": "Running in STDIO mode (local dev).",
             "personal_session": False,
+            "operator_credentials": op_status,
         }
 
     session = get_session(user_id)
@@ -644,6 +718,7 @@ async def session_status() -> dict[str, Any]:
             "personal_session": True,
             "session_age_seconds": session.age_seconds,
             "message": "Personal Schwab credentials active.",
+            "operator_credentials": op_status,
         }
         npub = get_dpyc_npub(user_id)
         if npub:
@@ -655,6 +730,7 @@ async def session_status() -> dict[str, Any]:
     return {
         "mode": "cloud",
         "personal_session": False,
+        "operator_credentials": op_status,
         "message": (
             "No active session. Follow the next_steps to onboard via "
             "Secure Courier -- credentials travel via encrypted Nostr DM "

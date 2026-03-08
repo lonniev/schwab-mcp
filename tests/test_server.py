@@ -1,6 +1,5 @@
 """Tests for server module — singletons, session resolution, credit gating."""
 
-import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -53,6 +52,7 @@ class TestSessionStatus:
             result = await session_status()
             assert result["mode"] == "stdio"
             assert result["personal_session"] is False
+            assert "operator_credentials" in result
 
     @pytest.mark.asyncio
     async def test_cloud_with_session(self):
@@ -151,49 +151,100 @@ class TestOnSchwabCredentialsReceived:
     """Tests for _on_schwab_credentials_received callback."""
 
     @pytest.mark.asyncio
-    async def test_creates_session_on_valid_credentials(self):
-        """Callback creates session with operator creds + user token."""
-        mock_client = MagicMock()
+    async def test_operator_credentials_stored(self):
+        """Callback with service='schwab-operator' stores creds in memory."""
+        import server
 
-        with (
-            patch("server._get_current_user_id", return_value="horizon-user-1"),
-            patch.dict(os.environ, {
-                "SCHWAB_CLIENT_ID": "op_id",
-                "SCHWAB_CLIENT_SECRET": "op_secret",
-            }),
-            patch("server._get_settings") as mock_settings,
-            patch("vault._create_client", return_value=mock_client) as mock_create,
-            patch("vault.set_session"),
-            patch("server._seed_balance", new_callable=AsyncMock, return_value=False),
-        ):
-            mock_settings_obj = MagicMock()
-            mock_settings_obj.schwab_client_id = "op_id"
-            mock_settings_obj.schwab_client_secret = "op_secret"
-            mock_settings_obj.schwab_trader_api = "https://api.schwabapi.com"
-            mock_settings_obj.seed_balance_sats = 0
-            mock_settings.return_value = mock_settings_obj
-
-            from server import _on_schwab_credentials_received
-
-            result = await _on_schwab_credentials_received(
-                sender_npub="npub1patron",
+        server._operator_credentials = None
+        try:
+            result = await server._on_schwab_credentials_received(
+                sender_npub="npub1operator",
                 credentials={
-                    "token_json": '{"access_token": "user_tok"}',
-                    "account_hash": "user_hash",
+                    "client_id": "op_id",
+                    "client_secret": "op_secret",
                 },
-                service="schwab",
+                service="schwab-operator",
             )
 
-            assert result["session_activated"] is True
-            assert result["dpyc_npub"] == "npub1patron"
-            mock_create.assert_called_once_with(
-                "op_id", "op_secret", '{"access_token": "user_tok"}',
-                api_base="https://api.schwabapi.com",
-            )
+            assert result["operator_credentials_vaulted"] is True
+            assert server._operator_credentials == {
+                "client_id": "op_id",
+                "client_secret": "op_secret",
+            }
+        finally:
+            server._operator_credentials = None
+
+    @pytest.mark.asyncio
+    async def test_patron_session_uses_operator_creds(self):
+        """Callback with service='schwab' reads _operator_credentials to create client."""
+        import server
+
+        mock_client = MagicMock()
+        server._operator_credentials = {
+            "client_id": "op_id",
+            "client_secret": "op_secret",
+        }
+
+        try:
+            with (
+                patch("server._get_current_user_id", return_value="horizon-user-1"),
+                patch("server._get_settings") as mock_settings,
+                patch("vault._create_client", return_value=mock_client) as mock_create,
+                patch("vault.set_session"),
+                patch("server._seed_balance", new_callable=AsyncMock, return_value=False),
+            ):
+                mock_settings_obj = MagicMock()
+                mock_settings_obj.schwab_trader_api = "https://api.schwabapi.com"
+                mock_settings_obj.seed_balance_sats = 0
+                mock_settings.return_value = mock_settings_obj
+
+                result = await server._on_schwab_credentials_received(
+                    sender_npub="npub1patron",
+                    credentials={
+                        "token_json": '{"access_token": "user_tok"}',
+                        "account_hash": "user_hash",
+                    },
+                    service="schwab",
+                )
+
+                assert result["session_activated"] is True
+                assert result["dpyc_npub"] == "npub1patron"
+                mock_create.assert_called_once_with(
+                    "op_id", "op_secret", '{"access_token": "user_tok"}',
+                    api_base="https://api.schwabapi.com",
+                )
+        finally:
+            server._operator_credentials = None
+
+    @pytest.mark.asyncio
+    async def test_patron_fails_without_operator_creds(self):
+        """Callback returns error when operator creds not delivered."""
+        import server
+
+        server._operator_credentials = None
+
+        try:
+            with (
+                patch("server._get_current_user_id", return_value="horizon-user-1"),
+                patch("server._get_courier_service", side_effect=Exception("no courier")),
+            ):
+                result = await server._on_schwab_credentials_received(
+                    sender_npub="npub1patron",
+                    credentials={
+                        "token_json": '{"access_token": "user_tok"}',
+                        "account_hash": "user_hash",
+                    },
+                    service="schwab",
+                )
+
+                assert result["session_activated"] is False
+                assert "operator credentials" in result["error"].lower()
+        finally:
+            server._operator_credentials = None
 
     @pytest.mark.asyncio
     async def test_returns_empty_when_no_user_id(self):
-        """Callback returns empty dict when no Horizon user ID."""
+        """Callback returns empty dict when no Horizon user ID for patron service."""
         with patch("server._get_current_user_id", return_value=None):
             from server import _on_schwab_credentials_received
 
@@ -212,6 +263,16 @@ class TestOnSchwabCredentialsReceived:
                 "npub1x", {"token_json": "x"}, "schwab"  # missing account_hash
             )
             assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_operator_returns_empty_when_missing_fields(self):
+        """Callback returns empty dict when operator creds missing required fields."""
+        from server import _on_schwab_credentials_received
+
+        result = await _on_schwab_credentials_received(
+            "npub1x", {"client_id": "x"}, "schwab-operator"  # missing client_secret
+        )
+        assert result == {}
 
 
 class TestToolCosts:
