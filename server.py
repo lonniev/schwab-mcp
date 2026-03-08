@@ -12,7 +12,6 @@ import logging
 from typing import Any
 
 from fastmcp import FastMCP
-
 from tollbooth.constants import ToolTier
 from tollbooth.slug_tools import make_slug_tool
 
@@ -28,7 +27,8 @@ mcp = FastMCP(
         "2. If no active session, follow the Secure Courier onboarding flow:\n"
         "   - Get your **patron npub** from the dpyc-oracle's how_to_join() tool — "
         "this is the npub you registered as a DPYC Citizen, your identity for credit operations\n"
-        "   - Call `request_credential_channel(recipient_npub=<patron_npub>)` to receive a welcome DM\n"
+        "   - Call `request_credential_channel(recipient_npub=<patron_npub>)` "
+        "to receive a welcome DM\n"
         "   - Reply via your Nostr client with your Schwab credentials in JSON\n"
         "   - Call `receive_credentials(sender_npub=<patron_npub>)` to vault your credentials\n\n"
         "## Credits Model\n\n"
@@ -40,10 +40,25 @@ tool = make_slug_tool(mcp, "schwab")
 
 _ONBOARDING_NEXT_STEPS = {
     "action": "secure_courier_onboarding",
-    "step_1": "Ask the user for their **patron npub** (the npub they registered as a DPYC Citizen). They can get one from the dpyc-oracle's how_to_join() tool.",
-    "step_2": "Call request_credential_channel(recipient_npub=<npub>) to send a welcome DM to the user's Nostr client.",
-    "step_3": "Tell the user to open their Nostr client (Primal, Damus, etc.) and reply to the welcome DM with their Schwab credentials in the JSON format shown. Credentials must NEVER appear in this chat.",
-    "step_4": "Once the user confirms they replied, call receive_credentials(sender_npub=<npub>) to vault the credentials for future sessions.",
+    "step_1": (
+        "Ask the user for their **patron npub** (the npub they registered "
+        "as a DPYC Citizen). They can get one from the dpyc-oracle's "
+        "how_to_join() tool."
+    ),
+    "step_2": (
+        "Call request_credential_channel(recipient_npub=<npub>) to send "
+        "a welcome DM to the user's Nostr client."
+    ),
+    "step_3": (
+        "Tell the user to open their Nostr client (Primal, Damus, etc.) "
+        "and reply to the welcome DM with their Schwab credentials in "
+        "the JSON format shown. Credentials must NEVER appear in this chat."
+    ),
+    "step_4": (
+        "Once the user confirms they replied, call "
+        "receive_credentials(sender_npub=<npub>) to vault the "
+        "credentials for future sessions."
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -666,7 +681,7 @@ async def request_credential_channel(
     How it works:
     1. Call this tool with your npub -- a welcome DM arrives in your Nostr inbox.
     2. Open your Nostr client (Primal, Damus, Amethyst, etc.).
-    3. Reply to the welcome message with a JSON payload: {"token_json": "...", "account_hash": "..."}.
+    3. Reply with JSON: {"token_json": "...", "account_hash": "..."}.
     4. Return here and call receive_credentials with your npub.
 
     Your credentials never appear in this chat.

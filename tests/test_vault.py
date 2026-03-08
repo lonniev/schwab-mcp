@@ -1,6 +1,5 @@
 """Tests for vault module — per-user session management."""
 
-import json
 import time
 from unittest.mock import MagicMock, patch
 

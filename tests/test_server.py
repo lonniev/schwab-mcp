@@ -1,6 +1,5 @@
 """Tests for server module — singletons, session resolution, credit gating."""
 
-import json
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -164,7 +163,7 @@ class TestOnSchwabCredentialsReceived:
             }),
             patch("server._get_settings") as mock_settings,
             patch("vault._create_client_from_token", return_value=mock_client) as mock_create,
-            patch("vault.set_session") as mock_set,
+            patch("vault.set_session"),
             patch("server._seed_balance", new_callable=AsyncMock, return_value=False),
         ):
             mock_settings_obj = MagicMock()
