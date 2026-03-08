@@ -1046,9 +1046,4 @@ async def get_price_history(
 
 
 if __name__ == "__main__":
-    settings = _get_settings()
-    mcp.run(
-        transport="streamable-http",
-        host=settings.schwab_mcp_host,
-        port=settings.schwab_mcp_port,
-    )
+    mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)
