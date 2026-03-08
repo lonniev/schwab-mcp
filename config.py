@@ -32,3 +32,11 @@ def get_schwab_account_hash() -> str:
 
 
 CALLBACK_URL = "https://127.0.0.1:8182"
+
+
+def get_mcp_host() -> str:
+    return os.environ.get("SCHWAB_MCP_HOST", "127.0.0.1")
+
+
+def get_mcp_port() -> int:
+    return int(os.environ.get("SCHWAB_MCP_PORT", "8000"))

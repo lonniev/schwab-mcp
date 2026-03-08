@@ -2,13 +2,13 @@
 
 from datetime import date, timedelta
 
-from schwab.client import Client
+from schwab.client import AsyncClient, Client
 
 from models import OptionContract
 
 
-def get_option_chain(
-    client: Client,
+async def get_option_chain(
+    client: AsyncClient,
     symbol: str,
     strike_count: int = 20,
     contract_type: str = "ALL",
@@ -34,7 +34,7 @@ def get_option_chain(
     from_date = date.today()
     to_date = from_date + timedelta(days=days_to_expiration)
 
-    r = client.get_option_chain(
+    r = await client.get_option_chain(
         symbol.upper(),
         contract_type=ct_enum,
         strike_count=strike_count,

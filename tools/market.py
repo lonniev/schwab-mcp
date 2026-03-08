@@ -1,9 +1,9 @@
 """Market data tools — quotes and price history."""
 
-from schwab.client import Client
+from schwab.client import AsyncClient, Client
 
 
-def get_quote(client: Client, symbols: str) -> str:
+async def get_quote(client: AsyncClient, symbols: str) -> str:
     """Get real-time quotes for one or more symbols.
 
     Args:
@@ -11,7 +11,7 @@ def get_quote(client: Client, symbols: str) -> str:
     """
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
 
-    r = client.get_quotes(symbol_list)
+    r = await client.get_quotes(symbol_list)
     r.raise_for_status()
     data = r.json()
 
@@ -39,8 +39,8 @@ def get_quote(client: Client, symbols: str) -> str:
     return "\n".join(lines)
 
 
-def get_price_history(
-    client: Client,
+async def get_price_history(
+    client: AsyncClient,
     symbol: str,
     period_type: str = "month",
     period: int = 1,
@@ -70,7 +70,7 @@ def get_price_history(
         "monthly": Client.PriceHistory.FrequencyType.MONTHLY,
     }.get(frequency_type, Client.PriceHistory.FrequencyType.DAILY)
 
-    r = client.get_price_history(
+    r = await client.get_price_history(
         symbol.upper(),
         period_type=period_type_enum,
         frequency_type=freq_type_enum,

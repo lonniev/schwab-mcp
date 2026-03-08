@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastmcp import Context, FastMCP
 
 from auth import create_client
-from config import get_schwab_account_hash
+from config import get_mcp_host, get_mcp_port, get_schwab_account_hash
 from tools.account import get_account_balances as _get_account_balances
 from tools.account import get_positions as _get_positions
 from tools.market import get_price_history as _get_price_history
@@ -31,7 +31,8 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
     try:
         yield {"schwab_client": client, "account_hash": account_hash}
     finally:
-        pass
+        if client is not None:
+            await client.close_async_session()
 
 
 mcp = FastMCP("Schwab MCP", lifespan=app_lifespan)
@@ -62,7 +63,7 @@ async def get_positions(ctx: Context) -> str:
     client, account_hash = _require_client(ctx)
     if client is None:
         return _NO_CREDS
-    return _get_positions(client, account_hash)
+    return await _get_positions(client, account_hash)
 
 
 @mcp.tool()
@@ -71,7 +72,7 @@ async def get_balances(ctx: Context) -> str:
     client, account_hash = _require_client(ctx)
     if client is None:
         return _NO_CREDS
-    return _get_account_balances(client, account_hash)
+    return await _get_account_balances(client, account_hash)
 
 
 @mcp.tool()
@@ -84,7 +85,7 @@ async def get_quote(symbols: str, ctx: Context) -> str:
     client, _ = _require_client(ctx)
     if client is None:
         return _NO_CREDS
-    return _get_quote(client, symbols)
+    return await _get_quote(client, symbols)
 
 
 @mcp.tool()
@@ -109,7 +110,7 @@ async def get_option_chain(
     client, _ = _require_client(ctx)
     if client is None:
         return _NO_CREDS
-    return _get_option_chain(client, symbol, strike_count, contract_type, days_to_expiration)
+    return await _get_option_chain(client, symbol, strike_count, contract_type, days_to_expiration)
 
 
 @mcp.tool()
@@ -133,8 +134,8 @@ async def get_price_history(
     client, _ = _require_client(ctx)
     if client is None:
         return _NO_CREDS
-    return _get_price_history(client, symbol, period_type, period, frequency_type, frequency)
+    return await _get_price_history(client, symbol, period_type, period, frequency_type, frequency)
 
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(transport="streamable-http", host=get_mcp_host(), port=get_mcp_port())

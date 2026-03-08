@@ -1,22 +1,22 @@
 """Tests for market data tools with mocked responses."""
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from tools.market import get_price_history, get_quote
 
 
-def _mock_client(response_data: dict) -> MagicMock:
+def _mock_client(response_data: dict) -> AsyncMock:
     mock_response = MagicMock()
     mock_response.json.return_value = response_data
     mock_response.raise_for_status.return_value = None
 
-    client = MagicMock()
+    client = AsyncMock()
     client.get_quotes.return_value = mock_response
     client.get_price_history.return_value = mock_response
     return client
 
 
-def test_get_quote_single():
+async def test_get_quote_single():
     """Single symbol quote is formatted correctly."""
     data = {
         "AAPL": {
@@ -33,14 +33,14 @@ def test_get_quote_single():
         }
     }
     client = _mock_client(data)
-    result = get_quote(client, "AAPL")
+    result = await get_quote(client, "AAPL")
 
     assert "AAPL" in result
     assert "185.50" in result
     assert "45,000,000" in result
 
 
-def test_get_quote_multiple():
+async def test_get_quote_multiple():
     """Multiple symbols are all included."""
     aapl_quote = {
         "lastPrice": 185.50, "bidPrice": 0, "askPrice": 0,
@@ -57,13 +57,13 @@ def test_get_quote_multiple():
         "MSFT": {"quote": msft_quote, "reference": {}},
     }
     client = _mock_client(data)
-    result = get_quote(client, "AAPL, MSFT")
+    result = await get_quote(client, "AAPL, MSFT")
 
     assert "AAPL" in result
     assert "MSFT" in result
 
 
-def test_get_price_history():
+async def test_get_price_history():
     """Price history returns formatted candle table."""
     data = {
         "candles": [
@@ -80,15 +80,15 @@ def test_get_price_history():
         ]
     }
     client = _mock_client(data)
-    result = get_price_history(client, "AAPL")
+    result = await get_price_history(client, "AAPL")
 
     assert "AAPL" in result
     assert "180.00" in result
     assert "2 candles" in result
 
 
-def test_get_price_history_empty():
+async def test_get_price_history_empty():
     """Empty candle data returns friendly message."""
     client = _mock_client({"candles": []})
-    result = get_price_history(client, "XYZ")
+    result = await get_price_history(client, "XYZ")
     assert "No price history" in result

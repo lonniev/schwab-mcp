@@ -1,17 +1,17 @@
 """Tests for option chain tool with mocked responses."""
 
 from datetime import date, timedelta
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from tools.options import get_option_chain
 
 
-def _mock_client(response_data: dict) -> MagicMock:
+def _mock_client(response_data: dict) -> AsyncMock:
     mock_response = MagicMock()
     mock_response.json.return_value = response_data
     mock_response.raise_for_status.return_value = None
 
-    client = MagicMock()
+    client = AsyncMock()
     client.get_option_chain.return_value = mock_response
     return client
 
@@ -99,44 +99,44 @@ def _mock_chain_data() -> dict:
     }
 
 
-def test_option_chain_filters_by_oi():
+async def test_option_chain_filters_by_oi():
     """Contracts with OI < 25 are excluded."""
     client = _mock_client(_mock_chain_data())
-    result = get_option_chain(client, "AAPL")
+    result = await get_option_chain(client, "AAPL")
 
     assert "175.0" not in result  # OI = 10, should be filtered out
     assert "190.0" in result or "190.00" in result
     assert "180.0" in result or "180.00" in result
 
 
-def test_option_chain_shows_greeks():
+async def test_option_chain_shows_greeks():
     """Greeks columns are present in output."""
     client = _mock_client(_mock_chain_data())
-    result = get_option_chain(client, "AAPL")
+    result = await get_option_chain(client, "AAPL")
 
     assert "Delta" in result
     assert "Theta" in result
     assert "0.35" in result or "0.350" in result  # delta of 190 call
 
 
-def test_option_chain_shows_otm_pct():
+async def test_option_chain_shows_otm_pct():
     """OTM percentage is calculated and displayed."""
     client = _mock_client(_mock_chain_data())
-    result = get_option_chain(client, "AAPL")
+    result = await get_option_chain(client, "AAPL")
 
     assert "OTM" in result
 
 
-def test_option_chain_empty():
+async def test_option_chain_empty():
     """Returns friendly message when no contracts match filters."""
     data = {"underlyingPrice": 100.0, "callExpDateMap": {}, "putExpDateMap": {}}
     client = _mock_client(data)
-    result = get_option_chain(client, "XYZ")
+    result = await get_option_chain(client, "XYZ")
     assert "No option contracts" in result
 
 
-def test_option_chain_underlying_price_in_header():
+async def test_option_chain_underlying_price_in_header():
     """Underlying price is shown in the output header."""
     client = _mock_client(_mock_chain_data())
-    result = get_option_chain(client, "AAPL")
+    result = await get_option_chain(client, "AAPL")
     assert "185.00" in result

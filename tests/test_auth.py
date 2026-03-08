@@ -38,8 +38,8 @@ def test_write_token_noop_logs_warning(caplog):
     assert "stale" in caplog.text.lower()
 
 
-def test_create_client_calls_schwab_auth():
-    """create_client uses client_from_access_functions."""
+def test_create_client_passes_asyncio_true():
+    """create_client passes asyncio=True to client_from_access_functions."""
     with patch("auth.schwab.auth.client_from_access_functions") as mock_create:
         mock_create.return_value = MagicMock()
         with patch.dict(
@@ -54,4 +54,8 @@ def test_create_client_calls_schwab_auth():
 
             client = create_client()
             mock_create.assert_called_once()
+            call_kwargs = mock_create.call_args
+            assert call_kwargs.kwargs.get("asyncio") is True or (
+                len(call_kwargs.args) > 4 and call_kwargs.args[4] is True
+            )
             assert client is not None
