@@ -1,18 +1,14 @@
 """Tests for market data tools with mocked responses."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 from tools.market import get_price_history, get_quote
 
 
 def _mock_client(response_data: dict) -> AsyncMock:
-    mock_response = MagicMock()
-    mock_response.json.return_value = response_data
-    mock_response.raise_for_status.return_value = None
-
     client = AsyncMock()
-    client.get_quotes.return_value = mock_response
-    client.get_price_history.return_value = mock_response
+    client.get_quotes.return_value = response_data
+    client.get_price_history.return_value = response_data
     return client
 
 

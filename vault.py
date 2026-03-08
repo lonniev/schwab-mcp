@@ -2,7 +2,7 @@
 
 Per-user Schwab OAuth sessions backed by in-memory cache.
 Each user delivers their token_json + account_hash via Secure Courier;
-the server creates an AsyncClient from operator creds + user token
+the server creates a SchwabClient from operator creds + user token
 and caches it here.
 """
 
@@ -13,21 +13,22 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-import schwab.auth
-from schwab.client import AsyncClient
+from schwab_client import SchwabClient
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_API_BASE = "https://api.schwabapi.com"
 
 SESSION_TTL_SECONDS = 3600  # 1 hour
 
 
 @dataclass
 class UserSession:
-    """Per-user session holding a cached Schwab AsyncClient."""
+    """Per-user session holding a cached SchwabClient."""
 
     token_json: str  # Schwab OAuth token blob (JSON string)
     account_hash: str  # Schwab account hash
-    client: AsyncClient  # Cached async client
+    client: SchwabClient  # Cached async client
     npub: str | None = None
     created_at: float = field(default_factory=time.time)
 
@@ -51,37 +52,22 @@ _sessions: dict[str, UserSession] = {}  # horizon_user_id -> session
 _dpyc_sessions: dict[str, str] = {}  # horizon_user_id -> npub
 
 
-def _create_client_from_token(
+def _create_client(
     client_id: str,
     client_secret: str,
     token_json: str,
-) -> AsyncClient:
-    """Create an async Schwab client from operator creds + user token JSON."""
+    api_base: str = _DEFAULT_API_BASE,
+) -> SchwabClient:
+    """Create a SchwabClient from operator creds + user token JSON."""
     token_dict = json.loads(token_json) if isinstance(token_json, str) else token_json
-
-    def _read_token() -> dict:
-        return token_dict
-
-    def _write_token_noop(token: dict) -> None:
-        logger.warning(
-            "Access token refreshed at runtime. "
-            "User should re-deliver token via Secure Courier within 7 days."
-        )
-
-    return schwab.auth.client_from_access_functions(
-        api_key=client_id,
-        app_secret=client_secret,
-        token_read_func=_read_token,
-        token_write_func=_write_token_noop,
-        asyncio=True,
-    )
+    return SchwabClient(client_id, client_secret, token_dict, api_base)
 
 
 def set_session(
     user_id: str,
     token_json: str,
     account_hash: str,
-    client: AsyncClient,
+    client: SchwabClient,
     npub: str | None = None,
 ) -> UserSession:
     """Create or replace a session for a user."""
@@ -112,7 +98,7 @@ async def clear_session(user_id: str) -> None:
     _dpyc_sessions.pop(user_id, None)
     if session and session.client:
         try:
-            await session.client.close_async_session()
+            await session.client.close()
         except Exception:
             pass
 

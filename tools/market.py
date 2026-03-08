@@ -1,9 +1,9 @@
 """Market data tools — quotes and price history."""
 
-from schwab.client import AsyncClient, Client
+from schwab_client import SchwabClient
 
 
-async def get_quote(client: AsyncClient, symbols: str) -> str:
+async def get_quote(client: SchwabClient, symbols: str) -> str:
     """Get real-time quotes for one or more symbols.
 
     Args:
@@ -11,9 +11,7 @@ async def get_quote(client: AsyncClient, symbols: str) -> str:
     """
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
 
-    r = await client.get_quotes(symbol_list)
-    r.raise_for_status()
-    data = r.json()
+    data = await client.get_quotes(symbol_list)
 
     lines: list[str] = []
     for sym in symbol_list:
@@ -40,7 +38,7 @@ async def get_quote(client: AsyncClient, symbols: str) -> str:
 
 
 async def get_price_history(
-    client: AsyncClient,
+    client: SchwabClient,
     symbol: str,
     period_type: str = "month",
     period: int = 1,
@@ -56,27 +54,11 @@ async def get_price_history(
         frequency_type: "minute", "daily", "weekly", or "monthly".
         frequency: Frequency interval.
     """
-    period_type_enum = {
-        "day": Client.PriceHistory.PeriodType.DAY,
-        "month": Client.PriceHistory.PeriodType.MONTH,
-        "year": Client.PriceHistory.PeriodType.YEAR,
-        "ytd": Client.PriceHistory.PeriodType.YEAR,
-    }.get(period_type, Client.PriceHistory.PeriodType.MONTH)
-
-    freq_type_enum = {
-        "minute": Client.PriceHistory.FrequencyType.MINUTE,
-        "daily": Client.PriceHistory.FrequencyType.DAILY,
-        "weekly": Client.PriceHistory.FrequencyType.WEEKLY,
-        "monthly": Client.PriceHistory.FrequencyType.MONTHLY,
-    }.get(frequency_type, Client.PriceHistory.FrequencyType.DAILY)
-
-    r = await client.get_price_history(
+    data = await client.get_price_history(
         symbol.upper(),
-        period_type=period_type_enum,
-        frequency_type=freq_type_enum,
+        periodType=period_type,
+        frequencyType=frequency_type,
     )
-    r.raise_for_status()
-    data = r.json()
 
     candles = data.get("candles", [])
     if not candles:

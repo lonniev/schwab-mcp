@@ -1,15 +1,15 @@
 """Tests for vault module — per-user session management."""
 
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 
 def _make_mock_client():
-    """Create a mock AsyncClient."""
+    """Create a mock SchwabClient."""
     client = MagicMock()
-    client.close_async_session = MagicMock(return_value=None)
+    client.close = AsyncMock()
     return client
 
 
@@ -72,12 +72,7 @@ async def test_clear_session():
     _sessions.clear()
     _dpyc_sessions.clear()
 
-    client = MagicMock()
-
-    async def mock_close():
-        pass
-
-    client.close_async_session = mock_close
+    client = _make_mock_client()
 
     set_session("user-3", '{"t": "x"}', "hash", client, npub="npub1xyz")
     assert get_session_helper("user-3") is not None
@@ -127,22 +122,23 @@ def test_session_repr():
     assert "hash123" not in repr_str
 
 
-def test_create_client_from_token():
-    """_create_client_from_token creates async client with correct params."""
-    with patch("vault.schwab.auth.client_from_access_functions") as mock_create:
-        mock_create.return_value = _make_mock_client()
+def test_create_client():
+    """_create_client creates SchwabClient with correct params."""
+    with patch("vault.SchwabClient") as mock_cls:
+        mock_cls.return_value = _make_mock_client()
 
-        from vault import _create_client_from_token
+        from vault import _create_client
 
-        client = _create_client_from_token(
+        client = _create_client(
             client_id="op_id",
             client_secret="op_secret",
             token_json='{"access_token": "user_tok"}',
         )
 
-        mock_create.assert_called_once()
-        call_kwargs = mock_create.call_args
-        assert call_kwargs.kwargs["api_key"] == "op_id"
-        assert call_kwargs.kwargs["app_secret"] == "op_secret"
-        assert call_kwargs.kwargs["asyncio"] is True
+        mock_cls.assert_called_once_with(
+            "op_id",
+            "op_secret",
+            {"access_token": "user_tok"},
+            "https://api.schwabapi.com",
+        )
         assert client is not None

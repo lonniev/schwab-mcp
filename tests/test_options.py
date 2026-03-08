@@ -1,18 +1,14 @@
 """Tests for option chain tool with mocked responses."""
 
 from datetime import date, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 from tools.options import get_option_chain
 
 
 def _mock_client(response_data: dict) -> AsyncMock:
-    mock_response = MagicMock()
-    mock_response.json.return_value = response_data
-    mock_response.raise_for_status.return_value = None
-
     client = AsyncMock()
-    client.get_option_chain.return_value = mock_response
+    client.get_option_chain.return_value = response_data
     return client
 
 
