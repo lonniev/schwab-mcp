@@ -1,7 +1,7 @@
 """Tests for account tools with mocked Schwab API responses."""
 
 from datetime import date, timedelta
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from tools.account import get_account_balances, get_positions
 
@@ -61,20 +61,20 @@ def _mock_positions_response():
     }
 
 
-def _mock_client(response_data: dict) -> MagicMock:
+def _mock_client(response_data: dict) -> AsyncMock:
     mock_response = MagicMock()
     mock_response.json.return_value = response_data
     mock_response.raise_for_status.return_value = None
 
-    client = MagicMock()
+    client = AsyncMock()
     client.get_account.return_value = mock_response
     return client
 
 
-def test_get_positions_with_spread():
+async def test_get_positions_with_spread():
     """Positions are parsed and spreads are detected."""
     client = _mock_client(_mock_positions_response())
-    result = get_positions(client, "FAKE_HASH")
+    result = await get_positions(client, "FAKE_HASH")
 
     assert "Bull Put Spread" in result
     assert "AAPL" in result
@@ -83,21 +83,21 @@ def test_get_positions_with_spread():
     assert "SPY" in result
 
 
-def test_get_positions_empty():
+async def test_get_positions_empty():
     """Returns friendly message when no positions exist."""
     client = _mock_client({"securitiesAccount": {"positions": []}})
-    result = get_positions(client, "FAKE_HASH")
+    result = await get_positions(client, "FAKE_HASH")
     assert "No open positions" in result
 
 
-def test_get_positions_no_positions_key():
+async def test_get_positions_no_positions_key():
     """Handles missing positions key gracefully."""
     client = _mock_client({"securitiesAccount": {}})
-    result = get_positions(client, "FAKE_HASH")
+    result = await get_positions(client, "FAKE_HASH")
     assert "No open positions" in result
 
 
-def test_get_account_balances():
+async def test_get_account_balances():
     """Balances are parsed into readable format."""
     data = {
         "securitiesAccount": {
@@ -110,7 +110,7 @@ def test_get_account_balances():
         }
     }
     client = _mock_client(data)
-    result = get_account_balances(client, "FAKE_HASH")
+    result = await get_account_balances(client, "FAKE_HASH")
 
     assert "10,000.00" in result
     assert "20,000.00" in result

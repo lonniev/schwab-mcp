@@ -37,17 +37,18 @@ def _write_token_noop(token: dict) -> None:
     )
 
 
-def create_client() -> schwab.auth.Client:
-    """Create an authenticated schwab-py client from environment variables.
+def create_client():
+    """Create an authenticated async schwab-py client from environment variables.
 
-    Uses client_from_access_functions so we can load the token from an
-    env var rather than a file path.
+    Uses client_from_access_functions with asyncio=True so API methods
+    return coroutines suitable for an async FastMCP server.
     """
     return schwab.auth.client_from_access_functions(
         api_key=get_schwab_client_id(),
         app_secret=get_schwab_client_secret(),
         token_read_func=_read_token_from_env,
         token_write_func=_write_token_noop,
+        asyncio=True,
     )
 
 
