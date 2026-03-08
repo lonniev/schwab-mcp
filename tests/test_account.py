@@ -1,7 +1,7 @@
 """Tests for account tools with mocked Schwab API responses."""
 
 from datetime import date, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 from tools.account import get_account_balances, get_positions
 
@@ -62,12 +62,8 @@ def _mock_positions_response():
 
 
 def _mock_client(response_data: dict) -> AsyncMock:
-    mock_response = MagicMock()
-    mock_response.json.return_value = response_data
-    mock_response.raise_for_status.return_value = None
-
     client = AsyncMock()
-    client.get_account.return_value = mock_response
+    client.get_account.return_value = response_data
     return client
 
 

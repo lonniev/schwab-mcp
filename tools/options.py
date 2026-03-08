@@ -2,13 +2,12 @@
 
 from datetime import date, timedelta
 
-from schwab.client import AsyncClient, Client
-
 from models import OptionContract
+from schwab_client import SchwabClient
 
 
 async def get_option_chain(
-    client: AsyncClient,
+    client: SchwabClient,
     symbol: str,
     strike_count: int = 20,
     contract_type: str = "ALL",
@@ -25,26 +24,18 @@ async def get_option_chain(
         contract_type: "ALL", "CALL", or "PUT".
         days_to_expiration: Maximum days to expiration to include.
     """
-    ct_enum = {
-        "ALL": Client.Options.ContractType.ALL,
-        "CALL": Client.Options.ContractType.CALL,
-        "PUT": Client.Options.ContractType.PUT,
-    }.get(contract_type.upper(), Client.Options.ContractType.ALL)
-
     from_date = date.today()
     to_date = from_date + timedelta(days=days_to_expiration)
 
-    r = await client.get_option_chain(
+    data = await client.get_option_chain(
         symbol.upper(),
-        contract_type=ct_enum,
-        strike_count=strike_count,
-        include_underlying_quote=True,
-        strategy=Client.Options.Strategy.SINGLE,
-        from_date=from_date,
-        to_date=to_date,
+        contractType=contract_type.upper(),
+        strikeCount=strike_count,
+        includeUnderlyingQuote=True,
+        strategy="SINGLE",
+        fromDate=from_date.isoformat(),
+        toDate=to_date.isoformat(),
     )
-    r.raise_for_status()
-    data = r.json()
 
     underlying_price = data.get("underlyingPrice", 0.0)
     if not underlying_price:

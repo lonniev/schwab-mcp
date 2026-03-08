@@ -162,13 +162,14 @@ class TestOnSchwabCredentialsReceived:
                 "SCHWAB_CLIENT_SECRET": "op_secret",
             }),
             patch("server._get_settings") as mock_settings,
-            patch("vault._create_client_from_token", return_value=mock_client) as mock_create,
+            patch("vault._create_client", return_value=mock_client) as mock_create,
             patch("vault.set_session"),
             patch("server._seed_balance", new_callable=AsyncMock, return_value=False),
         ):
             mock_settings_obj = MagicMock()
             mock_settings_obj.schwab_client_id = "op_id"
             mock_settings_obj.schwab_client_secret = "op_secret"
+            mock_settings_obj.schwab_trader_api = "https://api.schwabapi.com"
             mock_settings_obj.seed_balance_sats = 0
             mock_settings.return_value = mock_settings_obj
 
@@ -186,7 +187,8 @@ class TestOnSchwabCredentialsReceived:
             assert result["session_activated"] is True
             assert result["dpyc_npub"] == "npub1patron"
             mock_create.assert_called_once_with(
-                "op_id", "op_secret", '{"access_token": "user_tok"}'
+                "op_id", "op_secret", '{"access_token": "user_tok"}',
+                api_base="https://api.schwabapi.com",
             )
 
     @pytest.mark.asyncio

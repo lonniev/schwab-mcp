@@ -2,14 +2,13 @@
 
 from datetime import date
 
-from schwab.client import AsyncClient, Client
-
 from models import (
     AccountBalances,
     EquityPosition,
     OptionPosition,
     SpreadPosition,
 )
+from schwab_client import SchwabClient
 
 
 def _parse_option_symbol(instrument: dict) -> dict:
@@ -91,15 +90,13 @@ def _detect_spreads(
     return spreads, remaining
 
 
-async def get_positions(client: AsyncClient, account_hash: str) -> str:
+async def get_positions(client: SchwabClient, account_hash: str) -> str:
     """Get current positions with options spread detection.
 
     Returns structured position data including DTE, P&L,
     and automatic spread pairing for options positions.
     """
-    r = await client.get_account(account_hash, fields=Client.Account.Fields.POSITIONS)
-    r.raise_for_status()
-    data = r.json()
+    data = await client.get_account(account_hash, fields="positions")
 
     positions = (
         data.get("securitiesAccount", {}).get("positions", [])
@@ -194,11 +191,9 @@ async def get_positions(client: AsyncClient, account_hash: str) -> str:
     return "\n".join(lines)
 
 
-async def get_account_balances(client: AsyncClient, account_hash: str) -> str:
+async def get_account_balances(client: SchwabClient, account_hash: str) -> str:
     """Get account summary: cash, buying power, net liquidation, day P&L."""
-    r = await client.get_account(account_hash)
-    r.raise_for_status()
-    data = r.json()
+    data = await client.get_account(account_hash)
 
     balances = data.get("securitiesAccount", {}).get("currentBalances", {})
 

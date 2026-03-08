@@ -5,7 +5,6 @@ description = "Multi-tenant FastMCP server for Charles Schwab brokerage data, mo
 requires-python = ">=3.11"
 dependencies = [
     "fastmcp>=2.0",
-    "schwab-py>=1.0",
     "httpx>=0.25.0",
     "pydantic>=2.0",
     "pydantic-settings>=2.0.0",
@@ -21,7 +20,7 @@ dev = [
 ]
 
 [tool.setuptools]
-py-modules = ["server", "auth", "settings", "models", "vault"]
+py-modules = ["server", "auth", "settings", "models", "vault", "schwab_client"]
 packages = ["tools", "tests"]
 
 [tool.ruff]

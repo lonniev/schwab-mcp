@@ -324,12 +324,13 @@ async def _on_schwab_credentials_received(
         )
         return result
 
-    from vault import _create_client_from_token, set_session
+    from vault import _create_client, set_session
 
-    client = _create_client_from_token(
+    client = _create_client(
         settings.schwab_client_id,
         settings.schwab_client_secret,
         credentials["token_json"],
+        api_base=settings.schwab_trader_api,
     )
 
     set_session(

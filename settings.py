@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     schwab_client_id: str | None = None
     schwab_client_secret: str | None = None
 
+    # Schwab Trader API base URL (no trailing slash)
+    schwab_trader_api: str = "https://api.schwabapi.com"
+
     # BTCPay Server (for Lightning invoices)
     btcpay_host: str | None = None
     btcpay_store_id: str | None = None
