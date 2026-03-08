@@ -1,18 +1,38 @@
 # schwab-mcp
 
-Read-only [MCP](https://modelcontextprotocol.io/) server exposing Charles Schwab brokerage data to AI agents via [FastMCP](https://github.com/jlowin/fastmcp). Serves over **Streamable HTTP** with an async schwab-py client so it can run as a long-lived HTTP server without blocking on Schwab API calls.
+Multi-tenant [MCP](https://modelcontextprotocol.io/) server exposing Charles Schwab brokerage data to AI agents via [FastMCP](https://github.com/jlowin/fastmcp). Monetized via [DPYC Tollbooth](https://github.com/lonniev/tollbooth-dpyc) Lightning micropayments. Serves over **Streamable HTTP** with direct async httpx calls to `api.schwabapi.com`.
 
 ## Tools
 
+### Brokerage (paid — credit-gated)
+
+| Tool | Cost | Description |
+|------|------|-------------|
+| `get_positions` | 5 api_sats | Portfolio positions with automatic options spread detection (bull put / bear call) |
+| `get_balances` | 5 api_sats | Cash, buying power, net liquidation value, day P&L |
+| `get_quote` | 5 api_sats | Real-time quotes for one or more symbols |
+| `get_option_chain` | 10 api_sats | Filtered option chain with Greeks, IV, OTM%, and OI threshold |
+| `get_price_history` | 10 api_sats | Historical OHLCV candle data |
+
+### Free
+
 | Tool | Description |
 |------|-------------|
-| `get_positions` | Portfolio positions with automatic options spread detection (bull put / bear call) |
-| `get_balances` | Cash, buying power, net liquidation value, day P&L |
-| `get_quote` | Real-time quotes for one or more symbols |
-| `get_option_chain` | Filtered option chain with Greeks, IV, OTM%, and OI threshold |
-| `get_price_history` | Historical OHLCV candle data |
+| `session_status` | Check current session and DPYC identity state |
+| `request_credential_channel` | Open a Secure Courier channel for credential delivery via Nostr DM |
+| `receive_credentials` | Pick up credentials from the encrypted vault |
+| `forget_credentials` | Delete vaulted credentials for re-delivery |
+| `check_balance` | View credit balance and usage |
+| `purchase_credits` | Create a Lightning invoice to buy credits |
+| `check_payment` | Verify Lightning payment and credit the balance |
 
-All tools are read-only. No orders are placed.
+All brokerage tools are read-only. No orders are placed.
+
+## Architecture
+
+- **Multi-tenant**: operator provides `SCHWAB_CLIENT_ID` / `SCHWAB_CLIENT_SECRET` via env vars; each user delivers `token_json` + `account_hash` via Secure Courier (encrypted Nostr DM)
+- **Direct httpx**: thin `SchwabClient` wrapper with bearer auth and proactive token refresh (no third-party Schwab SDK)
+- **Tollbooth DPYC**: pre-funded Lightning balances, Authority-certified purchase orders, NeonVault (Postgres) for ledger persistence
 
 ## Setup
 
@@ -20,7 +40,7 @@ All tools are read-only. No orders are placed.
 
 - Python 3.11+
 - A [Schwab Developer](https://developer.schwab.com/) app with API credentials
-- An OAuth token obtained via the bootstrap flow
+- An OAuth token (generated via Schwab's developer portal)
 
 ### Install
 
@@ -30,22 +50,18 @@ uv sync            # or: pip install -e ".[dev]"
 
 ### Environment Variables
 
+See [`.env.example`](.env.example) for the full list. Key variables:
+
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `SCHWAB_CLIENT_ID` | Yes | Schwab API app key |
 | `SCHWAB_CLIENT_SECRET` | Yes | Schwab API app secret |
-| `SCHWAB_TOKEN_JSON` | Yes | JSON string of the OAuth token (from bootstrap) |
-| `SCHWAB_ACCOUNT_HASH` | Yes | Account hash (from Schwab account numbers endpoint) |
-| `SCHWAB_MCP_HOST` | No | Bind address (default `127.0.0.1`) |
-| `SCHWAB_MCP_PORT` | No | Bind port (default `8000`) |
+| `SCHWAB_TRADER_API` | No | API base URL (default `https://api.schwabapi.com`) |
+| `TOLLBOOTH_NOSTR_OPERATOR_NSEC` | Yes | Nostr signing key for Secure Courier |
+| `NEON_DATABASE_URL` | Yes | Postgres for NeonVault (ledger + credential persistence) |
+| `BTCPAY_HOST` / `BTCPAY_STORE_ID` / `BTCPAY_API_KEY` | Yes | BTCPay Server for Lightning invoices |
 
-### Bootstrap Token
-
-```bash
-python auth.py bootstrap
-```
-
-This opens a browser for Schwab OAuth login, writes `token.json`, and prints the JSON to paste into `SCHWAB_TOKEN_JSON`. Refresh tokens expire after 7 days — re-bootstrap before then.
+User credentials (`token_json`, `account_hash`) are delivered via Secure Courier — they never appear in env vars or chat.
 
 ## Run
 
@@ -53,17 +69,13 @@ This opens a browser for Schwab OAuth login, writes `token.json`, and prints the
 python server.py
 ```
 
-The server binds to `127.0.0.1:8000` by default and serves MCP over Streamable HTTP.
+The server binds to `0.0.0.0:8000` and serves MCP over Streamable HTTP.
 
 ### Verify
 
 ```bash
-curl http://127.0.0.1:8000/mcp
+curl http://localhost:8000/mcp
 ```
-
-### Graceful Degradation
-
-If Schwab credentials are missing, the server starts normally but all tools return a descriptive error message prompting the operator to configure environment variables.
 
 ## Tests
 
@@ -71,25 +83,30 @@ If Schwab credentials are missing, the server starts normally but all tools retu
 uv run pytest tests/ -v
 ```
 
-17 tests covering all tools with mocked Schwab API responses.
+48 tests covering all tools, the httpx client, vault, auth, server credit gating, and Secure Courier callbacks.
 
 ## Project Structure
 
 ```
 schwab-mcp/
-  server.py          # FastMCP server, lifespan, tool wrappers
-  auth.py            # OAuth token management + bootstrap CLI
-  config.py          # Environment variable accessors
-  models.py          # Pydantic response models
+  server.py            # FastMCP server, singletons, credit gating, 12 tool endpoints
+  schwab_client.py     # Thin async httpx client — bearer auth + token refresh
+  vault.py             # Per-user session management (in-memory cache)
+  auth.py              # User client creation from operator creds + user token
+  settings.py          # pydantic-settings (env vars, .env file)
+  models.py            # Pydantic response models
   tools/
-    account.py       # Positions + balances (spread detection)
-    market.py        # Quotes + price history
-    options.py       # Option chain retrieval + filtering
+    account.py         # Positions + balances (spread detection)
+    market.py          # Quotes + price history
+    options.py         # Option chain retrieval + filtering
   tests/
-    test_auth.py
-    test_account.py
-    test_market.py
-    test_options.py
+    test_schwab_client.py  # httpx client, token refresh, URL building
+    test_server.py         # Singletons, credit gating, Secure Courier callback
+    test_vault.py          # Session management
+    test_auth.py           # Client creation
+    test_account.py        # Position + balance parsing
+    test_market.py         # Quote + price history formatting
+    test_options.py        # Option chain filtering
 ```
 
 ## License
