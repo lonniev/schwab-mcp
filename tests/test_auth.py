@@ -38,8 +38,8 @@ def test_write_token_noop_logs_warning(caplog):
     assert "stale" in caplog.text.lower()
 
 
-def test_create_client_passes_asyncio_true():
-    """create_client passes asyncio=True to client_from_access_functions."""
+def test_create_user_client_passes_asyncio_true():
+    """create_user_client passes operator creds + user token + asyncio=True."""
     with patch("auth.schwab.auth.client_from_access_functions") as mock_create:
         mock_create.return_value = MagicMock()
         with patch.dict(
@@ -47,15 +47,27 @@ def test_create_client_passes_asyncio_true():
             {
                 "SCHWAB_CLIENT_ID": "test_id",
                 "SCHWAB_CLIENT_SECRET": "test_secret",
-                "SCHWAB_TOKEN_JSON": '{"access_token": "x"}',
             },
         ):
-            from auth import create_client
+            from auth import create_user_client
 
-            client = create_client()
+            token_json = json.dumps({"access_token": "user_token"})
+            client = create_user_client(token_json)
+
             mock_create.assert_called_once()
             call_kwargs = mock_create.call_args
             assert call_kwargs.kwargs.get("asyncio") is True or (
                 len(call_kwargs.args) > 4 and call_kwargs.args[4] is True
             )
+            assert call_kwargs.kwargs.get("api_key") == "test_id"
+            assert call_kwargs.kwargs.get("app_secret") == "test_secret"
             assert client is not None
+
+
+def test_create_user_client_requires_operator_creds():
+    """create_user_client raises when operator creds are missing."""
+    from auth import create_user_client
+
+    with patch.dict(os.environ, {}, clear=True):
+        with pytest.raises(EnvironmentError, match="SCHWAB_CLIENT_ID"):
+            create_user_client('{"access_token": "x"}')
