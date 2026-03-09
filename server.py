@@ -232,12 +232,22 @@ async def _ensure_operator_credentials() -> dict[str, str]:
     try:
         operator_npub = _get_operator_npub()
         courier = _get_courier_service()
-        await courier.receive(operator_npub, service="schwab-operator")
+        result = await courier.receive(operator_npub, service="schwab-operator")
+        logger.info(
+            "Operator credential cold-start restore: success=%s, callback_error=%s",
+            result.get("success"), result.get("callback_error"),
+        )
         # callback fires → sets _operator_credentials
         if _operator_credentials:
             return _operator_credentials
-    except Exception:
-        pass
+        # Callback didn't set it — log diagnostic info
+        logger.warning(
+            "Vault restore returned success=%s but _operator_credentials still None. "
+            "Result keys: %s",
+            result.get("success"), list(result.keys()),
+        )
+    except Exception as exc:
+        logger.warning("Operator credential cold-start restore failed: %s", exc)
 
     raise ValueError(
         "Schwab operator credentials not configured. "
@@ -392,11 +402,17 @@ async def _on_schwab_credentials_received(
     # to client_id / client_secret for the OAuth flow.
     if service == "schwab-operator":
         if not all(k in credentials for k in ("app_key", "secret")):
+            logger.warning(
+                "schwab-operator callback: expected keys (app_key, secret) "
+                "but got %s — skipping",
+                list(credentials.keys()),
+            )
             return result
         _operator_credentials = {
             "client_id": credentials["app_key"],
             "client_secret": credentials["secret"],
         }
+        logger.info("Operator credentials activated in memory.")
         return {"operator_credentials_vaulted": True}
 
     # --- Patron credentials (per-user) ---
@@ -732,6 +748,14 @@ async def session_status() -> dict[str, Any]:
     from vault import get_dpyc_npub, get_session
 
     user_id = _get_current_user_id()
+
+    # Try cold-start restore if operator creds aren't in memory
+    if not _operator_credentials:
+        try:
+            await _ensure_operator_credentials()
+        except (ValueError, RuntimeError):
+            pass
+
     op_status = "configured" if _operator_credentials else "not_configured"
 
     if not user_id:
