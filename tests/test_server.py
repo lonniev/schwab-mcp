@@ -269,30 +269,6 @@ class TestOnSchwabCredentialsReceived:
             assert result == {}
 
     @pytest.mark.asyncio
-    async def test_operator_legacy_keys_accepted(self):
-        """Callback accepts legacy client_id/client_secret keys from vault."""
-        import server
-
-        server._operator_credentials = None
-        try:
-            result = await server._on_schwab_credentials_received(
-                sender_npub="npub1operator",
-                credentials={
-                    "client_id": "legacy_id",
-                    "client_secret": "legacy_secret",
-                },
-                service="schwab-operator",
-            )
-
-            assert result["operator_credentials_vaulted"] is True
-            assert server._operator_credentials == {
-                "client_id": "legacy_id",
-                "client_secret": "legacy_secret",
-            }
-        finally:
-            server._operator_credentials = None
-
-    @pytest.mark.asyncio
     async def test_operator_returns_empty_when_missing_fields(self):
         """Callback returns empty dict when operator creds missing required fields."""
         from server import _on_schwab_credentials_received

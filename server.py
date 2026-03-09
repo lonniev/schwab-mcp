@@ -420,24 +420,19 @@ async def _on_schwab_credentials_received(
     result: dict[str, Any] = {}
 
     # --- Operator credentials (global, one-time) ---
-    # Accept both naming conventions:
-    #   new (v0.6.0+): app_key / secret  (Schwab Developer Portal UI names)
-    #   legacy:        client_id / client_secret  (pre-v0.6.0 vault entries)
+    # DM fields use Schwab UI names (app_key / secret); mapped internally
+    # to client_id / client_secret for the OAuth flow.
     if service == "schwab-operator":
-        if all(k in credentials for k in ("app_key", "secret")):
-            cid, csec = credentials["app_key"], credentials["secret"]
-        elif all(k in credentials for k in ("client_id", "client_secret")):
-            cid, csec = credentials["client_id"], credentials["client_secret"]
-        else:
+        if not all(k in credentials for k in ("app_key", "secret")):
             logger.warning(
-                "schwab-operator callback: expected keys (app_key, secret) or "
-                "(client_id, client_secret) but got %s — skipping",
+                "schwab-operator callback: expected keys (app_key, secret) "
+                "but got %s — skipping",
                 list(credentials.keys()),
             )
             return result
         _operator_credentials = {
-            "client_id": cid,
-            "client_secret": csec,
+            "client_id": credentials["app_key"],
+            "client_secret": credentials["secret"],
         }
         logger.info("Operator credentials activated in memory.")
         return {"operator_credentials_vaulted": True}
