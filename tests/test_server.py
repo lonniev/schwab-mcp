@@ -279,6 +279,130 @@ class TestOnSchwabCredentialsReceived:
         assert result == {}
 
 
+class TestDrainStaleDMs:
+    """Tests for stale relay DM drain on forget and receive."""
+
+    @pytest.mark.asyncio
+    async def test_forget_drains_stale_dms(self):
+        """forget_credentials calls _drain_stale_dms and includes count in result."""
+        mock_courier = MagicMock()
+        mock_courier.forget = AsyncMock(return_value={"success": True})
+
+        with (
+            patch("server._get_courier_service", return_value=mock_courier),
+            patch("server._get_current_user_id", return_value="user-1"),
+            patch("server._drain_stale_dms", new_callable=AsyncMock, return_value=3) as mock_drain,
+        ):
+            from server import forget_credentials
+
+            result = await forget_credentials("npub1sender", "schwab")
+
+            assert result["success"] is True
+            assert result["relay_dms_drained"] == 3
+            mock_drain.assert_called_once_with("npub1sender", "schwab")
+
+    @pytest.mark.asyncio
+    async def test_receive_drains_stale_dms(self):
+        """receive_credentials calls _drain_stale_dms after successful receive."""
+        mock_courier = MagicMock()
+        mock_courier.receive = AsyncMock(return_value={"success": True, "service": "schwab"})
+
+        with (
+            patch("server._get_courier_service", return_value=mock_courier),
+            patch("server._get_current_user_id", return_value="user-1"),
+            patch("server._drain_stale_dms", new_callable=AsyncMock, return_value=2) as mock_drain,
+        ):
+            from server import receive_credentials
+
+            result = await receive_credentials("npub1sender", "schwab")
+
+            assert result["success"] is True
+            assert result["stale_dms_drained"] == 2
+            mock_drain.assert_called_once_with("npub1sender", "schwab")
+
+    @pytest.mark.asyncio
+    async def test_receive_no_drain_key_when_zero(self):
+        """receive_credentials omits stale_dms_drained when drain returns 0."""
+        mock_courier = MagicMock()
+        mock_courier.receive = AsyncMock(return_value={"success": True})
+
+        with (
+            patch("server._get_courier_service", return_value=mock_courier),
+            patch("server._get_current_user_id", return_value="user-1"),
+            patch("server._drain_stale_dms", new_callable=AsyncMock, return_value=0),
+        ):
+            from server import receive_credentials
+
+            result = await receive_credentials("npub1sender", "schwab")
+
+            assert "stale_dms_drained" not in result
+
+    @pytest.mark.asyncio
+    async def test_drain_pops_without_ack(self):
+        """_drain_stale_dms calls _pop_event with only event_id (no reply/reason)."""
+        mock_exchange = MagicMock()
+        mock_exchange._fetch_dms_from_relays = MagicMock()
+        mock_exchange._find_dm_candidates = MagicMock(return_value=[
+            {"id": "evt1", "created_at": 1000},
+            {"id": "evt2", "created_at": 999},
+        ])
+        mock_exchange._pop_event = MagicMock()
+
+        mock_courier = MagicMock()
+        mock_courier._exchange = mock_exchange
+
+        mock_pk = MagicMock()
+        mock_pk.hex.return_value = "abcd1234"
+
+        with (
+            patch("server._get_courier_service", return_value=mock_courier),
+            patch("server._persist_consumed_ids", new_callable=AsyncMock),
+            patch("pynostr.key.PublicKey") as mock_pubkey_cls,
+        ):
+            mock_pubkey_cls.from_npub.return_value = mock_pk
+
+            from server import _drain_stale_dms
+
+            count = await _drain_stale_dms("npub1sender", "schwab")
+
+            assert count == 2
+            # Verify _pop_event called with ONLY event_id — no reply_npub or reason
+            assert mock_exchange._pop_event.call_count == 2
+            mock_exchange._pop_event.assert_any_call("evt1")
+            mock_exchange._pop_event.assert_any_call("evt2")
+
+    @pytest.mark.asyncio
+    async def test_consumed_ids_loaded_on_init(self):
+        """_load_consumed_ids populates exchange._consumed_ids from Neon."""
+        import threading
+
+        mock_exchange = MagicMock()
+        mock_exchange._lock = threading.Lock()
+        mock_exchange._consumed_ids = set()
+
+        mock_courier = MagicMock()
+        mock_courier._exchange = mock_exchange
+
+        mock_vault = MagicMock()
+        mock_vault._execute = AsyncMock(side_effect=[
+            # First call: ensure_schema (CREATE TABLE)
+            {"rows": []},
+            # Second call: SELECT event_id
+            {"rows": [["evt_old_1"], ["evt_old_2"]]},
+        ])
+
+        with (
+            patch("server._get_courier_service", return_value=mock_courier),
+            patch("server._get_commerce_vault", return_value=mock_vault),
+        ):
+            from server import _load_consumed_ids
+
+            await _load_consumed_ids()
+
+            assert "evt_old_1" in mock_exchange._consumed_ids
+            assert "evt_old_2" in mock_exchange._consumed_ids
+
+
 class TestToolCosts:
     """Tests for TOOL_COSTS table."""
 

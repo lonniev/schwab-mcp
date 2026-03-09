@@ -8,6 +8,7 @@ via the full Tollbooth DPYC monetization stack (Lightning micropayments).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -529,7 +530,6 @@ def _get_courier_service():
     commerce_vault = _get_commerce_vault()
     credential_vault = NeonCredentialVault(neon_vault=commerce_vault)
 
-    import asyncio
     try:
         asyncio.ensure_future(credential_vault.ensure_schema())
     except RuntimeError:
@@ -552,7 +552,122 @@ def _get_courier_service():
         on_credentials_received=_on_schwab_credentials_received,
     )
 
+    # Pre-populate consumed event IDs from Neon so previously-drained
+    # relay DMs are skipped without re-processing on cold start.
+    try:
+        asyncio.ensure_future(_load_consumed_ids())
+    except RuntimeError:
+        pass
+
     return _courier_service
+
+
+# ---------------------------------------------------------------------------
+# Stale relay DM drain helpers
+# ---------------------------------------------------------------------------
+
+
+async def _ensure_consumed_events_schema() -> None:
+    """Create the consumed_relay_events table if it doesn't exist."""
+    vault = _get_commerce_vault()
+    await vault._execute(
+        "CREATE TABLE IF NOT EXISTS consumed_relay_events ("
+        "    event_id TEXT PRIMARY KEY,"
+        "    service TEXT NOT NULL,"
+        "    consumed_at TIMESTAMPTZ DEFAULT now()"
+        ")"
+    )
+
+
+async def _load_consumed_ids() -> None:
+    """Load persisted consumed event IDs from Neon into the exchange."""
+    try:
+        vault = _get_commerce_vault()
+        await _ensure_consumed_events_schema()
+        result = await vault._execute(
+            "SELECT event_id FROM consumed_relay_events"
+        )
+        rows = result.get("rows", [])
+        if not rows:
+            return
+
+        courier = _get_courier_service()
+        exchange = courier._exchange
+        event_ids = {row[0] if isinstance(row, (list, tuple)) else row["event_id"] for row in rows}
+        with exchange._lock:
+            exchange._consumed_ids.update(event_ids)
+        logger.info("Loaded %d consumed event IDs from Neon.", len(event_ids))
+    except Exception as exc:
+        logger.debug("Failed to load consumed event IDs: %s", exc)
+
+
+async def _persist_consumed_ids(event_ids: list[str], service: str) -> None:
+    """Bulk-insert consumed event IDs into Neon. Prunes rows >7 days old."""
+    if not event_ids:
+        return
+    try:
+        vault = _get_commerce_vault()
+        await _ensure_consumed_events_schema()
+        for eid in event_ids:
+            await vault._execute(
+                "INSERT INTO consumed_relay_events (event_id, service) "
+                "VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                [eid, service],
+            )
+        # Prune old rows
+        await vault._execute(
+            "DELETE FROM consumed_relay_events "
+            "WHERE consumed_at < now() - INTERVAL '7 days'"
+        )
+    except Exception as exc:
+        logger.warning("Failed to persist consumed event IDs: %s", exc)
+
+
+async def _drain_stale_dms(sender_npub: str, service: str) -> int:
+    """Drain stale relay DMs for a sender/service pair.
+
+    Pops each candidate DM without sending an ack (no reply_npub/reason),
+    so the NIP-09 deletion fires (daemon thread) but no slow synchronous
+    ack DM is sent back.
+
+    Returns the count of drained events.
+    """
+    try:
+        courier = _get_courier_service()
+        exchange = courier._exchange
+
+        from pynostr.key import PublicKey  # type: ignore[import-untyped]
+
+        sender_hex = PublicKey.from_npub(sender_npub).hex()
+
+        # Fetch recent DMs into the buffer
+        exchange._fetch_dms_from_relays()
+
+        # Find matching unconsumed candidates
+        candidates = exchange._find_dm_candidates(sender_hex)
+        if not candidates:
+            return 0
+
+        drained_ids: list[str] = []
+        for candidate in candidates:
+            event_id = candidate.get("id", "")
+            if not event_id:
+                continue
+            # Pop without reply — no ack DM, just NIP-09 deletion
+            exchange._pop_event(event_id)
+            drained_ids.append(event_id)
+
+        if drained_ids:
+            await _persist_consumed_ids(drained_ids, service)
+            logger.info(
+                "Drained %d stale relay DMs for %s (service=%s)",
+                len(drained_ids), sender_npub, service,
+            )
+
+        return len(drained_ids)
+    except Exception as exc:
+        logger.debug("Drain stale DMs failed: %s", exc)
+        return 0
 
 
 # ---------------------------------------------------------------------------
@@ -602,8 +717,6 @@ def _get_ledger_cache():
 
     vault = _get_commerce_vault()
     _ledger_cache = LedgerCache(vault)
-
-    import asyncio
 
     try:
         asyncio.ensure_future(_ledger_cache.start_background_flush())
@@ -895,9 +1008,14 @@ async def receive_credentials(
             if service == "schwab-operator"
             else _get_current_user_id()
         )
-        return await courier.receive(
+        result = await courier.receive(
             sender_npub, service=service, caller_id=caller_id,
         )
+        # Sweep any remaining stale DMs that weren't consumed by receive
+        drained = await _drain_stale_dms(sender_npub, service)
+        if drained:
+            result["stale_dms_drained"] = drained
+        return result
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -918,9 +1036,12 @@ async def forget_credentials(sender_npub: str, service: str = "schwab") -> dict[
     except (ValueError, RuntimeError) as e:
         return {"success": False, "error": str(e)}
 
-    return await courier.forget(
+    result = await courier.forget(
         sender_npub, service=service, caller_id=_get_current_user_id(),
     )
+    drained = await _drain_stale_dms(sender_npub, service)
+    result["relay_dms_drained"] = drained
+    return result
 
 
 # ---------------------------------------------------------------------------
