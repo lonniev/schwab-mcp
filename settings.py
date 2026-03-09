@@ -52,5 +52,3 @@ class Settings(BaseSettings):
     tollbooth_nostr_operator_nsec: str | None = None
     tollbooth_nostr_relays: str | None = None  # Comma-separated relay URLs
 
-    # OAuth redirect URI (where Schwab sends the authorization code)
-    schwab_oauth_redirect_uri: str = "https://127.0.0.1:8000/oauth/callback"
