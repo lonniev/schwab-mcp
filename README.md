@@ -30,9 +30,64 @@ All brokerage tools are read-only. No orders are placed.
 
 ## Architecture
 
-- **Multi-tenant**: operator delivers `client_id` / `client_secret` via Secure Courier (`service="schwab-operator"`); each user delivers `token_json` + `account_hash` via Secure Courier (`service="schwab"`). No Schwab credentials in env vars
+- **Multi-tenant**: operator delivers `app_key` / `secret` via Secure Courier (`service="schwab-operator"`); each user delivers `token_json` + `account_hash` via Secure Courier (`service="schwab"`). No Schwab credentials in env vars
 - **Direct httpx**: thin `SchwabClient` wrapper with bearer auth and proactive token refresh (no third-party Schwab SDK)
 - **Tollbooth DPYC**: pre-funded Lightning balances, Authority-certified purchase orders, NeonVault (Postgres) for ledger persistence
+
+## Patron Onboarding — Getting Your Schwab Credentials
+
+Two credentials are needed to activate a patron session: `token_json` (the full OAuth token) and `account_hash` (Schwab's encrypted account identifier).
+
+### Step 1 — Authorization URL
+
+Open in your browser (substitute your App Key):
+
+```
+https://api.schwabapi.com/v1/oauth/authorize?response_type=code&client_id=YOUR_APP_KEY&scope=readonly&redirect_uri=https://127.0.0.1
+```
+
+Log in to Schwab and authorize. The browser redirects to an unreachable page — this is expected. Copy the `code` parameter from the URL bar:
+
+```
+https://127.0.0.1/?code=LONG_CODE_STRING&session=...
+```
+
+### Step 2 — Token Exchange
+
+Run immediately (the code expires quickly):
+
+```bash
+curl -X POST https://api.schwabapi.com/v1/oauth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -u "YOUR_APP_KEY:YOUR_SECRET" \
+  -d "grant_type=authorization_code" \
+  -d "code=LONG_CODE_STRING" \
+  -d "redirect_uri=https://127.0.0.1"
+```
+
+The full JSON response is your `token_json`.
+
+### Step 3 — Get Account Hash
+
+```bash
+curl -X GET https://api.schwabapi.com/trader/v1/accounts/accountNumbers \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+The `hashValue` field is your `account_hash`.
+
+### Step 4 — Deliver via Secure Courier
+
+In Claude.ai (or your MCP client):
+
+1. Call `request_credential_channel(recipient_npub=<your_npub>)` — a welcome DM arrives in your Nostr client
+2. Reply with:
+   ```json
+   {"token_json": "<paste full token JSON>", "account_hash": "<hashValue>"}
+   ```
+3. Call `receive_credentials(sender_npub=<your_npub>)` — session activates
+
+Your credentials never appear in the chat. The `refresh_token` in `token_json` auto-renews access (7-day TTL from Schwab).
 
 ## Setup
 
@@ -40,7 +95,7 @@ All brokerage tools are read-only. No orders are placed.
 
 - Python 3.11+
 - A [Schwab Developer](https://developer.schwab.com/) app with API credentials
-- An OAuth token (generated via Schwab's developer portal)
+- A Nostr client (Primal, Damus, Amethyst, etc.) for Secure Courier credential delivery
 
 ### Install
 
