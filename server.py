@@ -31,8 +31,12 @@ mcp = FastMCP(
         '   - Reply with JSON: `{"app_key": "...", "secret": "..."}`\n'
         "   - Call `receive_credentials(sender_npub=<operator_npub>, "
         'service="schwab-operator")`\n\n'
-        "3. **Patron onboarding** (per-user): Each user delivers their Schwab "
-        "token via Secure Courier with `service='schwab'`:\n"
+        "3. **Patron onboarding** (per-user) — choose one:\n\n"
+        "   **Option A — OAuth (recommended):**\n"
+        "   - Call `begin_oauth(patron_npub=<your_npub>)` to get an authorization URL\n"
+        "   - Open the URL in your browser and log in to Schwab\n"
+        "   - Call `check_oauth_status()` to confirm session activation\n\n"
+        "   **Option B — Manual Secure Courier:**\n"
         "   - Get your **patron npub** from the dpyc-oracle's how_to_join() tool\n"
         "   - Call `request_credential_channel(recipient_npub=<patron_npub>)` "
         "to receive a welcome DM\n"
@@ -87,6 +91,8 @@ TOOL_COSTS: dict[str, int] = {
     "check_balance": ToolTier.FREE,
     "purchase_credits": ToolTier.FREE,
     "check_payment": ToolTier.FREE,
+    "begin_oauth": ToolTier.FREE,
+    "check_oauth_status": ToolTier.FREE,
     # Paid — READ tier (5 api_sats)
     "get_positions": ToolTier.WRITE,
     "get_balances": ToolTier.WRITE,
@@ -238,6 +244,29 @@ async def _ensure_operator_credentials() -> dict[str, str]:
         "The operator must deliver app_key and secret via "
         "Secure Courier (service='schwab-operator')."
     )
+
+
+# ---------------------------------------------------------------------------
+# HMAC signing key for OAuth state tokens
+# ---------------------------------------------------------------------------
+
+_signing_key: bytes | None = None
+
+
+def _get_signing_key() -> bytes:
+    """Derive an HMAC signing key from sha256(operator_nsec)."""
+    global _signing_key
+    if _signing_key is not None:
+        return _signing_key
+
+    import hashlib
+
+    settings = _get_settings()
+    nsec = settings.tollbooth_nostr_operator_nsec
+    if not nsec:
+        raise RuntimeError("TOLLBOOTH_NOSTR_OPERATOR_NSEC not set — cannot derive signing key.")
+    _signing_key = hashlib.sha256(nsec.encode()).digest()
+    return _signing_key
 
 
 # ---------------------------------------------------------------------------
@@ -941,6 +970,142 @@ async def check_balance() -> dict[str, Any]:
         user_tiers_json=settings.btcpay_user_tiers,
         default_credit_ttl_seconds=settings.credit_ttl_seconds,
     )
+
+
+# ---------------------------------------------------------------------------
+# MCP Tools — OAuth Flow (Free)
+# ---------------------------------------------------------------------------
+
+
+@tool
+async def begin_oauth(patron_npub: str) -> dict[str, Any]:
+    """Start the OAuth2 authorization flow to connect your Schwab account.
+
+    Returns an authorization URL — open it in your browser to log in to
+    Schwab and authorize. After authorizing, call check_oauth_status to
+    confirm your session is active.
+
+    Args:
+        patron_npub: Your DPYC patron Nostr public key (npub1...).
+    """
+    try:
+        user_id = _require_user_id()
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    try:
+        op_creds = await _ensure_operator_credentials()
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    try:
+        signing_key = _get_signing_key()
+    except RuntimeError as e:
+        return {"success": False, "error": str(e)}
+
+    settings = _get_settings()
+
+    from oauth_flow import begin_oauth_flow
+
+    return begin_oauth_flow(
+        horizon_user_id=user_id,
+        patron_npub=patron_npub,
+        client_id=op_creds["client_id"],
+        redirect_uri=settings.schwab_oauth_redirect_uri,
+        signing_key=signing_key,
+    )
+
+
+@tool
+async def check_oauth_status() -> dict[str, Any]:
+    """Check whether your OAuth authorization flow has completed.
+
+    Call this after opening the authorization URL from begin_oauth
+    and completing the Schwab login in your browser.
+    """
+    try:
+        user_id = _require_user_id()
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    from oauth_flow import check_oauth_status_for_user
+
+    return check_oauth_status_for_user(user_id)
+
+
+# ---------------------------------------------------------------------------
+# OAuth callback route
+# ---------------------------------------------------------------------------
+
+
+@mcp.custom_route("/oauth/callback", methods=["GET"])
+async def oauth_callback(request):
+    """Handle the Schwab OAuth2 redirect with authorization code."""
+    from starlette.responses import HTMLResponse
+
+    from oauth_flow import ERROR_HTML_TEMPLATE, SUCCESS_HTML, handle_oauth_callback
+
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+
+    if not code or not state:
+        html = ERROR_HTML_TEMPLATE.format(error="Missing code or state parameter.")
+        return HTMLResponse(html, status_code=400)
+
+    try:
+        signing_key = _get_signing_key()
+        op_creds = await _ensure_operator_credentials()
+    except (RuntimeError, ValueError) as e:
+        html = ERROR_HTML_TEMPLATE.format(error=str(e))
+        return HTMLResponse(html, status_code=500)
+
+    settings = _get_settings()
+
+    try:
+        pending = await handle_oauth_callback(
+            code=code,
+            state=state,
+            signing_key=signing_key,
+            client_id=op_creds["client_id"],
+            client_secret=op_creds["client_secret"],
+            redirect_uri=settings.schwab_oauth_redirect_uri,
+        )
+    except ValueError as e:
+        html = ERROR_HTML_TEMPLATE.format(error=str(e))
+        return HTMLResponse(html, status_code=400)
+
+    if pending.error:
+        html = ERROR_HTML_TEMPLATE.format(error=pending.error)
+        return HTMLResponse(html, status_code=500)
+
+    # Activate session from the exchanged token
+    import json
+
+    from vault import _create_client, set_session
+
+    token = pending.result["token"]
+    account_hash = pending.result["account_hash"]
+    token_json = json.dumps(token)
+
+    client = _create_client(
+        op_creds["client_id"],
+        op_creds["client_secret"],
+        token_json,
+        api_base=settings.schwab_trader_api,
+    )
+
+    set_session(
+        pending.horizon_user_id,
+        token_json,
+        account_hash,
+        client,
+        npub=pending.patron_npub,
+    )
+
+    # Seed balance for new users
+    await _seed_balance(pending.patron_npub)
+
+    return HTMLResponse(SUCCESS_HTML)
 
 
 # ---------------------------------------------------------------------------
