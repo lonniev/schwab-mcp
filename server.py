@@ -218,9 +218,20 @@ async def _resolve_authority_service_url() -> str:
 
 _operator_credentials: dict[str, str] | None = None
 
+# Well-known binding ID for operator credential session binding.
+# Stored by receive_credentials(service="schwab-operator") so any Horizon
+# worker process can discover the correct sender npub on cold start.
+_OPERATOR_BINDING_ID = "__schwab_operator__"
+
 
 async def _ensure_operator_credentials() -> dict[str, str]:
     """Return cached operator credentials, restoring from vault on cold start.
+
+    Two-track cold-start restore:
+    1. Session binding — resolve sender npub from persistent binding, then
+       vault lookup under the correct npub.
+    2. Operator npub — fall back to NSEC-derived npub (works when the
+       operator used their own Nostr key to send the DM).
 
     Raises ValueError if operator credentials have not been delivered.
     """
@@ -228,22 +239,33 @@ async def _ensure_operator_credentials() -> dict[str, str]:
     if _operator_credentials:
         return _operator_credentials
 
-    # Cold-start: try vault restore via Secure Courier
+    courier = _get_courier_service()
+
+    # Track 1: session binding → correct sender npub → vault restore
+    try:
+        await courier.ensure_identity(
+            _OPERATOR_BINDING_ID, service="schwab-operator",
+        )
+        if _operator_credentials:
+            logger.info("Operator credentials restored via session binding.")
+            return _operator_credentials
+    except Exception as exc:
+        logger.debug("Operator cold-start via session binding: %s", exc)
+
+    # Track 2: operator npub → vault restore (self-delivered case)
     try:
         operator_npub = _get_operator_npub()
-        courier = _get_courier_service()
         result = await courier.receive(operator_npub, service="schwab-operator")
         logger.info(
-            "Operator credential cold-start restore: success=%s, callback_error=%s",
+            "Operator credential cold-start (operator npub): success=%s, "
+            "callback_error=%s",
             result.get("success"), result.get("callback_error"),
         )
-        # callback fires → sets _operator_credentials
         if _operator_credentials:
             return _operator_credentials
-        # Callback didn't set it — log diagnostic info
         logger.warning(
-            "Vault restore returned success=%s but _operator_credentials still None. "
-            "Result keys: %s",
+            "Vault restore returned success=%s but _operator_credentials "
+            "still None. Result keys: %s",
             result.get("success"), list(result.keys()),
         )
     except Exception as exc:
@@ -866,8 +888,15 @@ async def receive_credentials(
         return {"success": False, "error": str(e)}
 
     try:
+        # Operator credentials use a well-known binding ID so any Horizon
+        # worker can discover the sender npub on cold start.
+        caller_id = (
+            _OPERATOR_BINDING_ID
+            if service == "schwab-operator"
+            else _get_current_user_id()
+        )
         return await courier.receive(
-            sender_npub, service=service, caller_id=_get_current_user_id(),
+            sender_npub, service=service, caller_id=caller_id,
         )
     except Exception as e:
         return {"success": False, "error": str(e)}

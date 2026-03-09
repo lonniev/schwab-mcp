@@ -226,7 +226,11 @@ class TestOnSchwabCredentialsReceived:
         try:
             with (
                 patch("server._get_current_user_id", return_value="horizon-user-1"),
-                patch("server._get_courier_service", side_effect=Exception("no courier")),
+                patch(
+                    "server._ensure_operator_credentials",
+                    new_callable=AsyncMock,
+                    side_effect=ValueError("Schwab operator credentials not configured"),
+                ),
             ):
                 result = await server._on_schwab_credentials_received(
                     sender_npub="npub1patron",
