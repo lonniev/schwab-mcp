@@ -19,6 +19,8 @@ Multi-tenant [MCP](https://modelcontextprotocol.io/) server exposing Charles Sch
 | Tool | Description |
 |------|-------------|
 | `session_status` | Check current session and DPYC identity state |
+| `begin_oauth` | Start OAuth2 flow — returns Schwab authorization URL |
+| `check_oauth_status` | Poll whether OAuth flow completed and session is active |
 | `request_credential_channel` | Open a Secure Courier channel for credential delivery via Nostr DM |
 | `receive_credentials` | Pick up credentials from the encrypted vault |
 | `forget_credentials` | Delete vaulted credentials for re-delivery |
@@ -38,7 +40,22 @@ All brokerage tools are read-only. No orders are placed.
 
 Two credentials are needed to activate a patron session: `token_json` (the full OAuth token) and `account_hash` (Schwab's encrypted account identifier).
 
-### Step 1 — Authorization URL
+### Option A — OAuth Flow (recommended)
+
+The server handles the token exchange and session activation automatically:
+
+1. In your MCP client, call `begin_oauth(patron_npub=<your_npub>)` — returns a Schwab authorization URL
+2. Open the URL in your browser and log in to Schwab
+3. Schwab redirects back to the server — token exchange and account lookup happen automatically
+4. Call `check_oauth_status()` to confirm your session is active
+
+No curl commands, no copy-paste. Your credentials never appear in the chat.
+
+### Option B — Manual Secure Courier
+
+If the OAuth redirect is unreachable (e.g. firewalled local dev), you can deliver credentials manually:
+
+#### Step 1 — Authorization URL
 
 Open in your browser (substitute your App Key):
 
@@ -52,7 +69,7 @@ Log in to Schwab and authorize. The browser redirects to an unreachable page —
 https://127.0.0.1/?code=LONG_CODE_STRING&session=...
 ```
 
-### Step 2 — Token Exchange
+#### Step 2 — Token Exchange
 
 Run immediately (the code expires quickly):
 
@@ -67,7 +84,7 @@ curl -X POST https://api.schwabapi.com/v1/oauth/token \
 
 The full JSON response is your `token_json`.
 
-### Step 3 — Get Account Hash
+#### Step 3 — Get Account Hash
 
 ```bash
 curl -X GET https://api.schwabapi.com/trader/v1/accounts/accountNumbers \
@@ -76,7 +93,7 @@ curl -X GET https://api.schwabapi.com/trader/v1/accounts/accountNumbers \
 
 The `hashValue` field is your `account_hash`.
 
-### Step 4 — Deliver via Secure Courier
+#### Step 4 — Deliver via Secure Courier
 
 In Claude.ai (or your MCP client):
 
@@ -140,16 +157,17 @@ curl http://localhost:8000/mcp
 uv run pytest tests/ -v
 ```
 
-50 tests covering all tools, the httpx client, vault, auth, server credit gating, and Secure Courier callbacks.
+65+ tests covering all tools, the httpx client, vault, auth, OAuth flow, server credit gating, and Secure Courier callbacks.
 
 ## Project Structure
 
 ```
 schwab-mcp/
-  server.py            # FastMCP server, singletons, credit gating, 12 tool endpoints
+  server.py            # FastMCP server, singletons, credit gating, 14 tool endpoints
   schwab_client.py     # Thin async httpx client — bearer auth + token refresh
   vault.py             # Per-user session management (in-memory cache)
   auth.py              # CLI bootstrap message (credentials via Secure Courier)
+  oauth_flow.py        # OAuth2 authorization code flow (state tokens, exchange, callback)
   settings.py          # pydantic-settings (env vars, .env file)
   models.py            # Pydantic response models
   tools/

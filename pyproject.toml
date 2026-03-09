@@ -1,6 +1,6 @@
 [project]
 name = "schwab-mcp"
-version = "0.5.1"
+version = "0.7.0"
 description = "Multi-tenant FastMCP server for Charles Schwab brokerage data, monetized via DPYC Tollbooth"
 requires-python = ">=3.11"
 dependencies = [
@@ -20,7 +20,7 @@ dev = [
 ]
 
 [tool.setuptools]
-py-modules = ["server", "auth", "settings", "models", "vault", "schwab_client"]
+py-modules = ["server", "auth", "settings", "models", "vault", "schwab_client", "oauth_flow"]
 packages = ["tools", "tests"]
 
 [tool.ruff]
