@@ -60,7 +60,7 @@ See [`.env.example`](.env.example) for the full list. Key variables:
 | `BTCPAY_HOST` / `BTCPAY_STORE_ID` / `BTCPAY_API_KEY` | Yes | BTCPay Server for Lightning invoices |
 
 All Schwab credentials flow exclusively through Secure Courier:
-- **Operator** delivers `client_id` + `client_secret` via `service="schwab-operator"` (one-time)
+- **Operator** delivers `app_key` + `secret` via `service="schwab-operator"` (one-time, mapped internally to client_id/client_secret)
 - **Patron** delivers `token_json` + `account_hash` via `service="schwab"` (per-user)
 
 No Schwab secrets ever appear in env vars or chat.

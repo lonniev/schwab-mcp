@@ -160,8 +160,8 @@ class TestOnSchwabCredentialsReceived:
             result = await server._on_schwab_credentials_received(
                 sender_npub="npub1operator",
                 credentials={
-                    "client_id": "op_id",
-                    "client_secret": "op_secret",
+                    "app_key": "op_id",
+                    "secret": "op_secret",
                 },
                 service="schwab-operator",
             )
@@ -270,7 +270,7 @@ class TestOnSchwabCredentialsReceived:
         from server import _on_schwab_credentials_received
 
         result = await _on_schwab_credentials_received(
-            "npub1x", {"client_id": "x"}, "schwab-operator"  # missing client_secret
+            "npub1x", {"app_key": "x"}, "schwab-operator"  # missing secret
         )
         assert result == {}
 

@@ -28,7 +28,7 @@ mcp = FastMCP(
         "credentials via Secure Courier with `service='schwab-operator'`:\n"
         '   - Call `request_credential_channel(service="schwab-operator", '
         "recipient_npub=<operator_npub>)`\n"
-        '   - Reply with JSON: `{"client_id": "...", "client_secret": "..."}`\n'
+        '   - Reply with JSON: `{"app_key": "...", "secret": "..."}`\n'
         "   - Call `receive_credentials(sender_npub=<operator_npub>, "
         'service="schwab-operator")`\n\n'
         "3. **Patron onboarding** (per-user): Each user delivers their Schwab "
@@ -50,7 +50,7 @@ _ONBOARDING_NEXT_STEPS = {
     "operator_setup": (
         "The operator must first deliver Schwab API app credentials via "
         'Secure Courier (service="schwab-operator"): '
-        '{"client_id": "...", "client_secret": "..."}. '
+        '{"app_key": "...", "secret": "..."}. '
         "This is a one-time setup per deployment."
     ),
     "step_1": (
@@ -235,7 +235,7 @@ async def _ensure_operator_credentials() -> dict[str, str]:
 
     raise ValueError(
         "Schwab operator credentials not configured. "
-        "The operator must deliver client_id and client_secret via "
+        "The operator must deliver app_key and secret via "
         "Secure Courier (service='schwab-operator')."
     )
 
@@ -351,7 +351,7 @@ async def _on_schwab_credentials_received(
     """Operator callback: handle credentials received via Secure Courier.
 
     Two services are supported:
-    - "schwab-operator": stores client_id + client_secret in memory (one-time)
+    - "schwab-operator": stores app_key + secret (mapped to client_id/client_secret) in memory
     - "schwab": combines operator creds with patron's token_json + account_hash
       to create a per-user session
     """
@@ -359,12 +359,14 @@ async def _on_schwab_credentials_received(
     result: dict[str, Any] = {}
 
     # --- Operator credentials (global, one-time) ---
+    # DM fields use Schwab UI names (app_key / secret); mapped internally
+    # to client_id / client_secret for the OAuth flow.
     if service == "schwab-operator":
-        if not all(k in credentials for k in ("client_id", "client_secret")):
+        if not all(k in credentials for k in ("app_key", "secret")):
             return result
         _operator_credentials = {
-            "client_id": credentials["client_id"],
-            "client_secret": credentials["client_secret"],
+            "client_id": credentials["app_key"],
+            "client_secret": credentials["secret"],
         }
         return {"operator_credentials_vaulted": True}
 
@@ -439,8 +441,8 @@ def _get_courier_service():
             service="schwab-operator",
             version=1,
             fields={
-                "client_id": FieldSpec(required=True, sensitive=True),
-                "client_secret": FieldSpec(required=True, sensitive=True),
+                "app_key": FieldSpec(required=True, sensitive=True),
+                "secret": FieldSpec(required=True, sensitive=True),
             },
             description="Schwab API app credentials (operator-provided)",
         ),
@@ -758,7 +760,9 @@ async def request_credential_channel(
     How it works:
     1. Call this tool with your npub -- a welcome DM arrives in your Nostr inbox.
     2. Open your Nostr client (Primal, Damus, Amethyst, etc.).
-    3. Reply with JSON: {"token_json": "...", "account_hash": "..."}.
+    3. Reply with JSON matching the service template:
+       - schwab-operator: {"app_key": "...", "secret": "..."}
+       - schwab: {"token_json": "...", "account_hash": "..."}
     4. Return here and call receive_credentials with your npub.
 
     Your credentials never appear in this chat.
