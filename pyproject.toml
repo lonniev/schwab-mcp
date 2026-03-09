@@ -1,6 +1,6 @@
 [project]
 name = "schwab-mcp"
-version = "0.7.0"
+version = "0.7.1"
 description = "Multi-tenant FastMCP server for Charles Schwab brokerage data, monetized via DPYC Tollbooth"
 requires-python = ">=3.11"
 dependencies = [
