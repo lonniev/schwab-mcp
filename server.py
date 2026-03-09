@@ -329,6 +329,20 @@ def _require_user_id() -> str:
     return user_id
 
 
+def _get_redirect_uri() -> str:
+    """Derive the OAuth redirect URI from the current HTTP request.
+
+    Respects reverse-proxy headers (Horizon, nginx) and falls back to
+    localhost for local dev.
+    """
+    from fastmcp.server.dependencies import get_http_headers
+
+    headers = get_http_headers(include_all=True)
+    proto = headers.get("x-forwarded-proto", "https")
+    host = headers.get("x-forwarded-host") or headers.get("host", "127.0.0.1:8000")
+    return f"{proto}://{host}/oauth/callback"
+
+
 def _get_effective_user_id() -> str:
     """Return the npub for the current user. Required for credit operations."""
     from vault import get_dpyc_npub
@@ -1177,15 +1191,13 @@ async def begin_oauth(patron_npub: str) -> dict[str, Any]:
     except RuntimeError as e:
         return {"success": False, "error": str(e)}
 
-    settings = _get_settings()
-
     from oauth_flow import begin_oauth_flow
 
     return begin_oauth_flow(
         horizon_user_id=user_id,
         patron_npub=patron_npub,
         client_id=op_creds["client_id"],
-        redirect_uri=settings.schwab_oauth_redirect_uri,
+        redirect_uri=_get_redirect_uri(),
         signing_key=signing_key,
     )
 
@@ -1233,7 +1245,10 @@ async def oauth_callback(request):
         html = ERROR_HTML_TEMPLATE.format(error=str(e))
         return HTMLResponse(html, status_code=500)
 
-    settings = _get_settings()
+    # Derive redirect_uri from the incoming request (same origin the browser hit)
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host", "127.0.0.1:8000")
+    redirect_uri = f"{proto}://{host}/oauth/callback"
 
     try:
         pending = await handle_oauth_callback(
@@ -1242,7 +1257,7 @@ async def oauth_callback(request):
             signing_key=signing_key,
             client_id=op_creds["client_id"],
             client_secret=op_creds["client_secret"],
-            redirect_uri=settings.schwab_oauth_redirect_uri,
+            redirect_uri=redirect_uri,
         )
     except ValueError as e:
         html = ERROR_HTML_TEMPLATE.format(error=str(e))
@@ -1257,6 +1272,7 @@ async def oauth_callback(request):
 
     from vault import _create_client, set_session
 
+    settings = _get_settings()
     token = pending.result["token"]
     account_hash = pending.result["account_hash"]
     token_json = json.dumps(token)

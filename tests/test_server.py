@@ -431,3 +431,98 @@ class TestToolCosts:
 
         assert TOOL_COSTS["get_option_chain"] > TOOL_COSTS["get_positions"]
         assert TOOL_COSTS["get_price_history"] > TOOL_COSTS["get_quote"]
+
+
+class TestGetRedirectUri:
+    """Tests for _get_redirect_uri helper."""
+
+    def test_derives_uri_from_forwarded_headers(self):
+        """_get_redirect_uri uses x-forwarded-proto and x-forwarded-host."""
+        mock_headers = {
+            "x-forwarded-proto": "https",
+            "x-forwarded-host": "schwab-mcp.fastmcp.app",
+            "host": "internal:8000",
+        }
+        with patch(
+            "fastmcp.server.dependencies.get_http_headers",
+            return_value=mock_headers,
+        ):
+            from server import _get_redirect_uri
+
+            result = _get_redirect_uri()
+
+        assert result == "https://schwab-mcp.fastmcp.app/oauth/callback"
+
+    def test_falls_back_to_host_header(self):
+        """_get_redirect_uri falls back to host header when no forwarded headers."""
+        mock_headers = {
+            "host": "localhost:8000",
+        }
+        with patch(
+            "fastmcp.server.dependencies.get_http_headers",
+            return_value=mock_headers,
+        ):
+            from server import _get_redirect_uri
+
+            result = _get_redirect_uri()
+
+        assert result == "https://localhost:8000/oauth/callback"
+
+    def test_falls_back_to_defaults(self):
+        """_get_redirect_uri uses defaults when no headers available."""
+        with patch(
+            "fastmcp.server.dependencies.get_http_headers",
+            return_value={},
+        ):
+            from server import _get_redirect_uri
+
+            result = _get_redirect_uri()
+
+        assert result == "https://127.0.0.1:8000/oauth/callback"
+
+
+class TestOAuthCallbackDeriveUri:
+    """Tests for oauth_callback route deriving redirect_uri from request."""
+
+    @pytest.mark.asyncio
+    async def test_callback_derives_redirect_uri_from_request(self):
+        """oauth_callback route derives redirect_uri from request headers."""
+        from unittest.mock import PropertyMock
+
+        mock_request = MagicMock()
+        mock_request.query_params = {"code": "auth-code-123", "state": "valid.state"}
+        mock_request.headers = {
+            "x-forwarded-proto": "https",
+            "x-forwarded-host": "schwab-mcp.fastmcp.app",
+            "host": "internal:8000",
+        }
+        mock_url = MagicMock()
+        mock_url.scheme = "http"
+        type(mock_request).url = PropertyMock(return_value=mock_url)
+
+        with (
+            patch("server._get_signing_key", return_value=b"key" * 8),
+            patch("server._ensure_operator_credentials", new_callable=AsyncMock,
+                  return_value={"client_id": "cid", "client_secret": "csec"}),
+            patch("oauth_flow.handle_oauth_callback", new_callable=AsyncMock) as mock_handle,
+            patch("server._get_settings") as mock_settings,
+            patch("server._seed_balance", new_callable=AsyncMock),
+        ):
+            mock_pending = MagicMock()
+            mock_pending.error = None
+            mock_pending.result = {
+                "token": {"access_token": "at", "refresh_token": "rt"},
+                "account_hash": "hash123",
+            }
+            mock_pending.horizon_user_id = "user-1"
+            mock_pending.patron_npub = "npub1test"
+            mock_handle.return_value = mock_pending
+            mock_settings.return_value = MagicMock(schwab_trader_api="https://api.schwabapi.com")
+
+            from server import oauth_callback
+
+            await oauth_callback(mock_request)
+
+        # Verify handle_oauth_callback received the derived redirect_uri
+        call_kwargs = mock_handle.call_args[1]
+        assert call_kwargs["redirect_uri"] == "https://schwab-mcp.fastmcp.app/oauth/callback"
