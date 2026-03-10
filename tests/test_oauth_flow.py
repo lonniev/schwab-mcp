@@ -1,4 +1,4 @@
-"""Tests for oauth_flow module — URL building, token exchange, collector retrieval."""
+"""Tests for oauth_flow module — Schwab-specific wrappers over tollbooth.oauth2_collector."""
 
 import base64
 import hashlib
@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from oauth_flow import (
-    _decrypt_code,
     begin_oauth_flow,
     build_authorize_url,
+    decrypt_collector_code,
     exchange_code_for_token,
     fetch_account_hash,
     retrieve_code_from_collector,
@@ -89,6 +89,11 @@ class TestBeginOAuthFlow:
         r2 = begin_oauth_flow("npub1same", "key", "https://cb.example.com")
         assert r1["authorize_url"] == r2["authorize_url"]
 
+    def test_message_mentions_schwab(self):
+        """The status message mentions Schwab as the provider."""
+        result = begin_oauth_flow("npub1x", "key", "https://cb.example.com")
+        assert "Schwab" in result["message"]
+
 
 # ---------------------------------------------------------------------------
 # exchange_code_for_token tests
@@ -115,7 +120,7 @@ class TestExchangeCodeForToken:
         mock_http.__aenter__ = AsyncMock(return_value=mock_http)
         mock_http.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("oauth_flow.httpx.AsyncClient", return_value=mock_http):
+        with patch("tollbooth.oauth2_collector.httpx.AsyncClient", return_value=mock_http):
             token = await exchange_code_for_token(
                 code="auth-code-xyz",
                 client_id="app-key",
@@ -133,6 +138,9 @@ class TestExchangeCodeForToken:
         assert "Basic" in call_kwargs.kwargs.get("headers", call_kwargs[1].get("headers", {})).get(
             "Authorization", ""
         )
+
+        # Verify it posted to the Schwab token endpoint
+        assert call_kwargs[0][0] == "https://api.schwabapi.com/v1/oauth/token"
 
 
 # ---------------------------------------------------------------------------
@@ -185,29 +193,30 @@ class TestFetchAccountHash:
 # ---------------------------------------------------------------------------
 
 
-class TestDecryptCode:
-    """Tests for _decrypt_code (XOR with SHA-256 keystream)."""
+class TestDecryptCollectorCode:
+    """Tests for decrypt_collector_code (XOR with SHA-256 keystream)."""
 
     def test_roundtrip(self):
-        """_decrypt_code reverses the collector's encryption."""
+        """decrypt_collector_code reverses the collector's encryption."""
         encrypted = _fake_encrypt("my-secret-code", "my-state-token")
-        assert _decrypt_code(encrypted, "my-state-token") == "my-secret-code"
+        assert decrypt_collector_code(encrypted, "my-state-token") == "my-secret-code"
 
     def test_npub_as_state_roundtrip(self):
         """Encryption/decryption works with an npub as the state."""
         npub = "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3aael2"
         code = "authorization-code-from-schwab"
         encrypted = _fake_encrypt(code, npub)
-        assert _decrypt_code(encrypted, npub) == code
+        assert decrypt_collector_code(encrypted, npub) == code
 
-    def test_wrong_state_produces_different_output(self):
-        """_decrypt_code with wrong state does not return the original code."""
+    def test_wrong_state_raises(self):
+        """decrypt_collector_code with wrong state raises OAuthCollectorError."""
+        from tollbooth.oauth2_collector import OAuthCollectorError
+
         encrypted = _fake_encrypt("my-secret-code", "correct-state")
-        # XOR with wrong key may produce non-UTF-8 bytes; catch that too
         try:
-            result = _decrypt_code(encrypted, "wrong-state")
+            result = decrypt_collector_code(encrypted, "wrong-state")
             assert result != "my-secret-code"
-        except UnicodeDecodeError:
+        except OAuthCollectorError:
             pass  # Expected — wrong key produces invalid bytes
 
 
@@ -235,7 +244,7 @@ class TestRetrieveCodeFromCollector:
         mock_http.__aenter__ = AsyncMock(return_value=mock_http)
         mock_http.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("oauth_flow.httpx.AsyncClient", return_value=mock_http):
+        with patch("tollbooth.oauth2_collector.httpx.AsyncClient", return_value=mock_http):
             result = await retrieve_code_from_collector(
                 "https://collector.example.com", state
             )
@@ -257,7 +266,7 @@ class TestRetrieveCodeFromCollector:
         mock_http.__aenter__ = AsyncMock(return_value=mock_http)
         mock_http.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("oauth_flow.httpx.AsyncClient", return_value=mock_http):
+        with patch("tollbooth.oauth2_collector.httpx.AsyncClient", return_value=mock_http):
             result = await retrieve_code_from_collector(
                 "https://collector.example.com", "npub1abc"
             )
@@ -280,7 +289,7 @@ class TestRetrieveCodeFromCollector:
         mock_http.__aenter__ = AsyncMock(return_value=mock_http)
         mock_http.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("oauth_flow.httpx.AsyncClient", return_value=mock_http):
+        with patch("tollbooth.oauth2_collector.httpx.AsyncClient", return_value=mock_http):
             result = await retrieve_code_from_collector(
                 "https://collector.example.com/", state
             )
