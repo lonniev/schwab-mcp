@@ -213,6 +213,36 @@ async def _resolve_authority_service_url() -> str:
     return _cached_authority_service_url
 
 
+_cached_collector_url: str | None = None
+
+
+async def _resolve_collector_url() -> str:
+    """Resolve the OAuth2 collector URL from the DPYC registry."""
+    global _cached_collector_url
+    if _cached_collector_url is not None:
+        return _cached_collector_url
+
+    from tollbooth.registry import DEFAULT_REGISTRY_URL, DPYCRegistry, RegistryError
+
+    settings = _get_settings()
+    registry = DPYCRegistry(
+        url=DEFAULT_REGISTRY_URL,
+        cache_ttl_seconds=settings.dpyc_registry_cache_ttl_seconds,
+    )
+    try:
+        svc = await registry.resolve_service_by_name("tollbooth-oauth2-collector")
+    except RegistryError as e:
+        raise RuntimeError(
+            f"Failed to resolve OAuth2 collector from registry: {e}"
+        ) from e
+    finally:
+        await registry.close()
+
+    _cached_collector_url = svc["url"].rstrip("/")
+    logger.info("Resolved OAuth2 collector URL: %s", _cached_collector_url)
+    return _cached_collector_url
+
+
 # ---------------------------------------------------------------------------
 # Operator credential cache (delivered via Secure Courier)
 # ---------------------------------------------------------------------------
@@ -306,15 +336,10 @@ def _require_user_id() -> str:
     return user_id
 
 
-def _get_redirect_uri() -> str:
+async def _get_redirect_uri() -> str:
     """Return the OAuth redirect URI pointing to the external collector."""
-    settings = _get_settings()
-    if not settings.oauth_collector_url:
-        raise RuntimeError(
-            "OAUTH_COLLECTOR_URL is not configured. "
-            "Set it to your deployed tollbooth-oauth2-collector URL."
-        )
-    return f"{settings.oauth_collector_url.rstrip('/')}/oauth/callback"
+    collector_url = await _resolve_collector_url()
+    return f"{collector_url}/oauth/callback"
 
 
 def _get_effective_user_id() -> str:
@@ -1165,11 +1190,12 @@ async def _check_oauth_via_collector(user_id: str, patron_npub: str) -> dict[str
         retrieve_code_from_collector,
     )
 
-    settings = _get_settings()
-    if not settings.oauth_collector_url:
-        return {"success": False, "error": "OAUTH_COLLECTOR_URL is not configured."}
+    try:
+        collector_url = await _resolve_collector_url()
+    except RuntimeError as e:
+        return {"success": False, "error": str(e)}
 
-    code = await retrieve_code_from_collector(settings.oauth_collector_url, patron_npub)
+    code = await retrieve_code_from_collector(collector_url, patron_npub)
     if code is None:
         return {
             "status": "pending",
@@ -1182,7 +1208,7 @@ async def _check_oauth_via_collector(user_id: str, patron_npub: str) -> dict[str
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
-    redirect_uri = _get_redirect_uri()
+    redirect_uri = await _get_redirect_uri()
 
     try:
         token = await exchange_code_for_token(
@@ -1200,6 +1226,7 @@ async def _check_oauth_via_collector(user_id: str, patron_npub: str) -> dict[str
 
     from vault import _create_client, set_session
 
+    settings = _get_settings()
     token_json = json.dumps(token)
     client = _create_client(
         op_creds["client_id"],
@@ -1237,7 +1264,7 @@ async def begin_oauth(patron_npub: str) -> dict[str, Any]:
         return {"success": False, "error": str(e)}
 
     try:
-        redirect_uri = _get_redirect_uri()
+        redirect_uri = await _get_redirect_uri()
     except RuntimeError as e:
         return {"success": False, "error": str(e)}
 

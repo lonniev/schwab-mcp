@@ -13,13 +13,18 @@ from __future__ import annotations
 import logging
 
 import httpx
-
 from tollbooth.oauth2_collector import (
     begin_oauth_flow as _begin_oauth_flow,
+)
+from tollbooth.oauth2_collector import (
     build_authorize_url as _build_authorize_url,
+)
+from tollbooth.oauth2_collector import (
     decrypt_collector_code,
-    exchange_code_for_token as _exchange_code_for_token,
     retrieve_code_from_collector,
+)
+from tollbooth.oauth2_collector import (
+    exchange_code_for_token as _exchange_code_for_token,
 )
 
 logger = logging.getLogger(__name__)
