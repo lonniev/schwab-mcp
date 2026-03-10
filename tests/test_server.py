@@ -433,56 +433,123 @@ class TestToolCosts:
         assert TOOL_COSTS["get_price_history"] > TOOL_COSTS["get_quote"]
 
 
+class TestResolveCollectorUrl:
+    """Tests for _resolve_collector_url (DPYC registry-based discovery)."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self):
+        """Clear the collector URL cache before each test."""
+        import server
+        server._cached_collector_url = None
+        yield
+        server._cached_collector_url = None
+
+    @pytest.mark.asyncio
+    async def test_resolves_from_registry(self):
+        """Resolves collector URL via DPYCRegistry.resolve_service_by_name."""
+        mock_settings = MagicMock()
+        mock_settings.dpyc_registry_cache_ttl_seconds = 300
+
+        mock_registry = AsyncMock()
+        mock_registry.resolve_service_by_name = AsyncMock(
+            return_value={
+                "npub": "npub1advocate",
+                "url": "https://collector.fastmcp.app/",
+                "name": "tollbooth-oauth2-collector",
+            }
+        )
+
+        with (
+            patch("server._get_settings", return_value=mock_settings),
+            patch("tollbooth.registry.DPYCRegistry", return_value=mock_registry),
+        ):
+            from server import _resolve_collector_url
+
+            result = await _resolve_collector_url()
+
+        assert result == "https://collector.fastmcp.app"  # trailing slash stripped
+        mock_registry.resolve_service_by_name.assert_awaited_once_with(
+            "tollbooth-oauth2-collector"
+        )
+        mock_registry.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_caches_result(self):
+        """Second call returns cached URL without registry lookup."""
+        import server
+
+        server._cached_collector_url = "https://cached.example.com"
+        result = await server._resolve_collector_url()
+        assert result == "https://cached.example.com"
+
+    @pytest.mark.asyncio
+    async def test_raises_on_registry_error(self):
+        """Raises RuntimeError when registry lookup fails."""
+        from tollbooth.registry import RegistryError
+
+        mock_settings = MagicMock()
+        mock_settings.dpyc_registry_cache_ttl_seconds = 300
+
+        mock_registry = AsyncMock()
+        mock_registry.resolve_service_by_name = AsyncMock(
+            side_effect=RegistryError("No active member with service")
+        )
+
+        with (
+            patch("server._get_settings", return_value=mock_settings),
+            patch("tollbooth.registry.DPYCRegistry", return_value=mock_registry),
+        ):
+            from server import _resolve_collector_url
+
+            with pytest.raises(RuntimeError, match="Failed to resolve OAuth2 collector"):
+                await _resolve_collector_url()
+
+        mock_registry.close.assert_awaited_once()
+
+
 class TestGetRedirectUri:
-    """Tests for _get_redirect_uri helper (external collector)."""
+    """Tests for _get_redirect_uri helper (registry-based collector discovery)."""
 
-    def test_uses_collector_url(self):
-        """_get_redirect_uri returns collector callback URL."""
-        mock_settings = MagicMock()
-        mock_settings.oauth_collector_url = "https://collector.fastmcp.app"
-
-        with patch("server._get_settings", return_value=mock_settings):
+    @pytest.mark.asyncio
+    async def test_uses_registry_collector_url(self):
+        """_get_redirect_uri resolves collector URL from DPYC registry."""
+        with patch(
+            "server._resolve_collector_url",
+            new_callable=AsyncMock,
+            return_value="https://collector.fastmcp.app",
+        ):
             from server import _get_redirect_uri
 
-            result = _get_redirect_uri()
+            result = await _get_redirect_uri()
 
         assert result == "https://collector.fastmcp.app/oauth/callback"
 
-    def test_strips_trailing_slash(self):
-        """_get_redirect_uri strips trailing slash from collector URL."""
-        mock_settings = MagicMock()
-        mock_settings.oauth_collector_url = "https://collector.fastmcp.app/"
-
-        with patch("server._get_settings", return_value=mock_settings):
+    @pytest.mark.asyncio
+    async def test_raises_when_registry_fails(self):
+        """_get_redirect_uri raises RuntimeError when registry lookup fails."""
+        with patch(
+            "server._resolve_collector_url",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("Failed to resolve OAuth2 collector from registry"),
+        ):
             from server import _get_redirect_uri
 
-            result = _get_redirect_uri()
-
-        assert result == "https://collector.fastmcp.app/oauth/callback"
-
-    def test_raises_when_not_configured(self):
-        """_get_redirect_uri raises RuntimeError when collector URL is not set."""
-        mock_settings = MagicMock()
-        mock_settings.oauth_collector_url = None
-
-        with patch("server._get_settings", return_value=mock_settings):
-            from server import _get_redirect_uri
-
-            with pytest.raises(RuntimeError, match="OAUTH_COLLECTOR_URL"):
-                _get_redirect_uri()
+            with pytest.raises(RuntimeError, match="Failed to resolve"):
+                await _get_redirect_uri()
 
 
 class TestCheckOAuthViaCollector:
-    """Tests for _check_oauth_via_collector (npub-as-state, stateless)."""
+    """Tests for _check_oauth_via_collector (registry-based discovery, npub-as-state)."""
 
     @pytest.mark.asyncio
     async def test_pending_when_code_not_ready(self):
         """Returns pending when collector has no code yet."""
-        mock_settings = MagicMock()
-        mock_settings.oauth_collector_url = "https://collector.example.com"
-
         with (
-            patch("server._get_settings", return_value=mock_settings),
+            patch(
+                "server._resolve_collector_url",
+                new_callable=AsyncMock,
+                return_value="https://collector.example.com",
+            ),
             patch(
                 "oauth_flow.retrieve_code_from_collector",
                 new_callable=AsyncMock,
@@ -501,7 +568,6 @@ class TestCheckOAuthViaCollector:
         import time
 
         mock_settings = MagicMock()
-        mock_settings.oauth_collector_url = "https://collector.example.com"
         mock_settings.schwab_trader_api = "https://api.schwabapi.com"
 
         mock_token = {
@@ -515,11 +581,20 @@ class TestCheckOAuthViaCollector:
         with (
             patch("server._get_settings", return_value=mock_settings),
             patch(
+                "server._resolve_collector_url",
+                new_callable=AsyncMock,
+                return_value="https://collector.example.com",
+            ),
+            patch(
                 "server._ensure_operator_credentials",
                 new_callable=AsyncMock,
                 return_value={"client_id": "cid", "client_secret": "csec"},
             ),
-            patch("server._get_redirect_uri", return_value="https://collector.example.com/oauth/callback"),
+            patch(
+                "server._get_redirect_uri",
+                new_callable=AsyncMock,
+                return_value="https://collector.example.com/oauth/callback",
+            ),
             patch(
                 "oauth_flow.retrieve_code_from_collector",
                 new_callable=AsyncMock,
@@ -551,33 +626,39 @@ class TestCheckOAuthViaCollector:
         assert call_kwargs.kwargs.get("npub") == "npub1patron" or call_kwargs[1].get("npub") == "npub1patron"
 
     @pytest.mark.asyncio
-    async def test_returns_error_when_collector_not_configured(self):
-        """Returns error when OAUTH_COLLECTOR_URL is not set."""
-        mock_settings = MagicMock()
-        mock_settings.oauth_collector_url = None
-
-        with patch("server._get_settings", return_value=mock_settings):
+    async def test_returns_error_when_registry_fails(self):
+        """Returns error when registry lookup for collector fails."""
+        with patch(
+            "server._resolve_collector_url",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("Failed to resolve OAuth2 collector from registry"),
+        ):
             from server import _check_oauth_via_collector
 
             result = await _check_oauth_via_collector("user-1", "npub1abc")
 
         assert result["success"] is False
-        assert "OAUTH_COLLECTOR_URL" in result["error"]
+        assert "Failed to resolve" in result["error"]
 
     @pytest.mark.asyncio
     async def test_returns_failed_on_token_exchange_error(self):
         """Returns failed when token exchange raises an exception."""
-        mock_settings = MagicMock()
-        mock_settings.oauth_collector_url = "https://collector.example.com"
-
         with (
-            patch("server._get_settings", return_value=mock_settings),
+            patch(
+                "server._resolve_collector_url",
+                new_callable=AsyncMock,
+                return_value="https://collector.example.com",
+            ),
             patch(
                 "server._ensure_operator_credentials",
                 new_callable=AsyncMock,
                 return_value={"client_id": "cid", "client_secret": "csec"},
             ),
-            patch("server._get_redirect_uri", return_value="https://collector.example.com/oauth/callback"),
+            patch(
+                "server._get_redirect_uri",
+                new_callable=AsyncMock,
+                return_value="https://collector.example.com/oauth/callback",
+            ),
             patch(
                 "oauth_flow.retrieve_code_from_collector",
                 new_callable=AsyncMock,
