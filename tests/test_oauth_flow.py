@@ -1,69 +1,57 @@
-"""Tests for oauth_flow module — state tokens, flow management, token exchange."""
+"""Tests for oauth_flow module — URL building, token exchange, collector retrieval."""
 
+import base64
+import hashlib
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from oauth_flow import (
-    OAuthPendingState,
-    _pending_states,
+    _decrypt_code,
     begin_oauth_flow,
     build_authorize_url,
-    check_oauth_status_for_user,
     exchange_code_for_token,
     fetch_account_hash,
-    generate_state_token,
-    handle_oauth_callback,
-    validate_state_token,
+    retrieve_code_from_collector,
 )
 
-# Deterministic test key
-_TEST_KEY = b"test-signing-key-32bytes-long!!!"
-
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# Helpers
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(autouse=True)
-def _clear_pending_states():
-    """Ensure pending state store is clean for each test."""
-    _pending_states.clear()
-    yield
-    _pending_states.clear()
+def _fake_encrypt(code: str, state: str) -> str:
+    """Encrypt a code the same way the collector does (XOR + base64)."""
+    key = hashlib.sha256(state.encode()).digest()
+    code_bytes = code.encode()
+    encrypted = bytes(c ^ key[i % 32] for i, c in enumerate(code_bytes))
+    return base64.urlsafe_b64encode(encrypted).decode()
 
 
 # ---------------------------------------------------------------------------
-# State token tests
+# build_authorize_url tests
 # ---------------------------------------------------------------------------
 
 
-class TestStateTokens:
-    """HMAC-signed state token generation and validation."""
+class TestBuildAuthorizeUrl:
+    """Tests for build_authorize_url."""
 
-    def test_roundtrip(self):
-        """A generated token validates with the same key."""
-        token = generate_state_token(_TEST_KEY)
-        assert validate_state_token(token, _TEST_KEY)
+    def test_constructs_url(self):
+        """build_authorize_url includes all required params."""
+        url = build_authorize_url("my-key", "https://example.com/cb", "state123")
+        assert "client_id=my-key" in url
+        assert "redirect_uri=" in url
+        assert "state=state123" in url
+        assert "response_type=code" in url
+        assert "scope=readonly" in url
+        assert url.startswith("https://api.schwabapi.com/v1/oauth/authorize?")
 
-    def test_tampered_nonce(self):
-        """A token with a modified nonce fails validation."""
-        token = generate_state_token(_TEST_KEY)
-        nonce, sig = token.split(".")
-        tampered = "ff" + nonce[2:] + "." + sig
-        assert not validate_state_token(tampered, _TEST_KEY)
-
-    def test_wrong_key(self):
-        """A token validated with a different key fails."""
-        token = generate_state_token(_TEST_KEY)
-        wrong_key = b"wrong-key-wrong-key-wrong-key!!!"
-        assert not validate_state_token(token, wrong_key)
-
-    def test_no_dot(self):
-        """A token without a dot separator fails validation."""
-        assert not validate_state_token("nodothere", _TEST_KEY)
+    def test_npub_as_state(self):
+        """build_authorize_url correctly encodes an npub as state."""
+        url = build_authorize_url("key", "https://cb.example.com", "npub1abc123")
+        assert "state=npub1abc123" in url
 
 
 # ---------------------------------------------------------------------------
@@ -72,108 +60,34 @@ class TestStateTokens:
 
 
 class TestBeginOAuthFlow:
-    """Tests for begin_oauth_flow."""
+    """Tests for begin_oauth_flow (stateless — npub as state)."""
 
-    def test_creates_pending_state(self):
-        """begin_oauth_flow creates a new pending state entry."""
+    def test_returns_pending_with_url(self):
+        """begin_oauth_flow returns pending status with authorization URL."""
         result = begin_oauth_flow(
-            horizon_user_id="user-1",
             patron_npub="npub1abc",
             client_id="my-app-key",
-            redirect_uri="https://example.com/callback",
-            signing_key=_TEST_KEY,
+            redirect_uri="https://collector.example.com/oauth/callback",
         )
         assert result["status"] == "pending"
         assert "authorize_url" in result
         assert "api.schwabapi.com/v1/oauth/authorize" in result["authorize_url"]
-        assert len(_pending_states) == 1
+        assert "state=npub1abc" in result["authorize_url"]
 
-    def test_reuses_existing_flow(self):
-        """begin_oauth_flow reuses a non-expired flow for the same user."""
-        result1 = begin_oauth_flow(
-            horizon_user_id="user-1",
-            patron_npub="npub1abc",
-            client_id="my-app-key",
-            redirect_uri="https://example.com/callback",
-            signing_key=_TEST_KEY,
-        )
-        result2 = begin_oauth_flow(
-            horizon_user_id="user-1",
-            patron_npub="npub1abc",
-            client_id="my-app-key",
-            redirect_uri="https://example.com/callback",
-            signing_key=_TEST_KEY,
-        )
-        assert result1["authorize_url"] == result2["authorize_url"]
-        assert len(_pending_states) == 1
-
-    def test_cleans_expired_states(self):
-        """begin_oauth_flow removes expired states."""
-        # Inject an expired state
-        _pending_states["old-token"] = OAuthPendingState(
-            patron_npub="npub1old",
-            horizon_user_id="user-old",
-            created_at=time.time() - 700,  # > 600s TTL
-        )
-
-        begin_oauth_flow(
-            horizon_user_id="user-new",
-            patron_npub="npub1new",
-            client_id="my-app-key",
-            redirect_uri="https://example.com/callback",
-            signing_key=_TEST_KEY,
-        )
-        assert "old-token" not in _pending_states
-        assert len(_pending_states) == 1
-
-
-# ---------------------------------------------------------------------------
-# check_oauth_status_for_user tests
-# ---------------------------------------------------------------------------
-
-
-class TestCheckOAuthStatus:
-    """Tests for check_oauth_status_for_user."""
-
-    def test_pending(self):
-        """Returns pending when flow is in progress."""
-        begin_oauth_flow(
-            horizon_user_id="user-1",
-            patron_npub="npub1abc",
+    def test_uses_npub_as_state(self):
+        """The npub is used directly as the OAuth state parameter."""
+        result = begin_oauth_flow(
+            patron_npub="npub1patron123",
             client_id="key",
-            redirect_uri="https://example.com/cb",
-            signing_key=_TEST_KEY,
+            redirect_uri="https://cb.example.com",
         )
-        result = check_oauth_status_for_user("user-1")
-        assert result["status"] == "pending"
+        assert "state=npub1patron123" in result["authorize_url"]
 
-    def test_completed(self):
-        """Returns completed when flow finished successfully."""
-        _pending_states["tok"] = OAuthPendingState(
-            patron_npub="npub1abc",
-            horizon_user_id="user-1",
-            completed=True,
-            result={"token": {}, "account_hash": "hash123"},
-        )
-        result = check_oauth_status_for_user("user-1")
-        assert result["status"] == "completed"
-
-    def test_failed(self):
-        """Returns failed when flow completed with error."""
-        _pending_states["tok"] = OAuthPendingState(
-            patron_npub="npub1abc",
-            horizon_user_id="user-1",
-            completed=True,
-            error="Token exchange failed",
-        )
-        result = check_oauth_status_for_user("user-1")
-        assert result["status"] == "failed"
-        assert "Token exchange" in result["error"]
-
-    def test_no_flow(self):
-        """Returns no_flow when no state exists for user."""
-        result = check_oauth_status_for_user("user-unknown")
-        assert result["status"] == "no_flow"
+    def test_idempotent(self):
+        """Calling begin_oauth_flow twice with the same npub produces the same URL."""
+        r1 = begin_oauth_flow("npub1same", "key", "https://cb.example.com")
+        r2 = begin_oauth_flow("npub1same", "key", "https://cb.example.com")
+        assert r1["authorize_url"] == r2["authorize_url"]
 
 
 # ---------------------------------------------------------------------------
@@ -267,95 +181,112 @@ class TestFetchAccountHash:
 
 
 # ---------------------------------------------------------------------------
-# handle_oauth_callback tests
+# Encryption / decryption tests
 # ---------------------------------------------------------------------------
 
 
-class TestHandleOAuthCallback:
-    """Tests for handle_oauth_callback."""
+class TestDecryptCode:
+    """Tests for _decrypt_code (XOR with SHA-256 keystream)."""
+
+    def test_roundtrip(self):
+        """_decrypt_code reverses the collector's encryption."""
+        encrypted = _fake_encrypt("my-secret-code", "my-state-token")
+        assert _decrypt_code(encrypted, "my-state-token") == "my-secret-code"
+
+    def test_npub_as_state_roundtrip(self):
+        """Encryption/decryption works with an npub as the state."""
+        npub = "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3aael2"
+        code = "authorization-code-from-schwab"
+        encrypted = _fake_encrypt(code, npub)
+        assert _decrypt_code(encrypted, npub) == code
+
+    def test_wrong_state_produces_different_output(self):
+        """_decrypt_code with wrong state does not return the original code."""
+        encrypted = _fake_encrypt("my-secret-code", "correct-state")
+        # XOR with wrong key may produce non-UTF-8 bytes; catch that too
+        try:
+            result = _decrypt_code(encrypted, "wrong-state")
+            assert result != "my-secret-code"
+        except UnicodeDecodeError:
+            pass  # Expected — wrong key produces invalid bytes
+
+
+# ---------------------------------------------------------------------------
+# retrieve_code_from_collector tests
+# ---------------------------------------------------------------------------
+
+
+class TestRetrieveCodeFromCollector:
+    """Tests for retrieve_code_from_collector."""
 
     @pytest.mark.asyncio
-    async def test_success(self):
-        """handle_oauth_callback completes the flow on success."""
-        state_token = generate_state_token(_TEST_KEY)
-        _pending_states[state_token] = OAuthPendingState(
-            patron_npub="npub1patron",
-            horizon_user_id="user-1",
+    async def test_returns_decrypted_code_on_success(self):
+        """Returns the decrypted code when collector has it."""
+        state = "npub1abc123"
+        encrypted = _fake_encrypt("auth-code-abc", state)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"code": encrypted}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_http = AsyncMock()
+        mock_http.get.return_value = mock_response
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("oauth_flow.httpx.AsyncClient", return_value=mock_http):
+            result = await retrieve_code_from_collector(
+                "https://collector.example.com", state
+            )
+
+        assert result == "auth-code-abc"
+        mock_http.get.assert_called_once_with(
+            "https://collector.example.com/oauth/retrieve",
+            params={"state": state},
         )
 
-        with (
-            patch("oauth_flow.exchange_code_for_token", new_callable=AsyncMock) as mock_exchange,
-            patch("oauth_flow.fetch_account_hash", new_callable=AsyncMock) as mock_fetch,
-        ):
-            mock_exchange.return_value = {
-                "access_token": "at",
-                "refresh_token": "rt",
-                "expires_at": time.time() + 1800,
-            }
-            mock_fetch.return_value = "hash-abc"
+    @pytest.mark.asyncio
+    async def test_returns_none_on_404(self):
+        """Returns None when collector hasn't received the code yet."""
+        mock_response = MagicMock()
+        mock_response.status_code = 404
 
-            pending = await handle_oauth_callback(
-                code="auth-code",
-                state=state_token,
-                signing_key=_TEST_KEY,
-                client_id="key",
-                client_secret="secret",
-                redirect_uri="https://example.com/cb",
+        mock_http = AsyncMock()
+        mock_http.get.return_value = mock_response
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("oauth_flow.httpx.AsyncClient", return_value=mock_http):
+            result = await retrieve_code_from_collector(
+                "https://collector.example.com", "npub1abc"
             )
 
-        assert pending.completed is True
-        assert pending.error is None
-        assert pending.result["account_hash"] == "hash-abc"
-        assert pending.result["token"]["access_token"] == "at"
+        assert result is None
 
     @pytest.mark.asyncio
-    async def test_invalid_state(self):
-        """handle_oauth_callback raises ValueError for invalid HMAC."""
-        with pytest.raises(ValueError, match="Invalid state token"):
-            await handle_oauth_callback(
-                code="auth-code",
-                state="bad.token",
-                signing_key=_TEST_KEY,
-                client_id="key",
-                client_secret="secret",
-                redirect_uri="https://example.com/cb",
+    async def test_strips_trailing_slash(self):
+        """Strips trailing slash from collector URL."""
+        state = "npub1xyz"
+        encrypted = _fake_encrypt("xyz", state)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"code": encrypted}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_http = AsyncMock()
+        mock_http.get.return_value = mock_response
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("oauth_flow.httpx.AsyncClient", return_value=mock_http):
+            result = await retrieve_code_from_collector(
+                "https://collector.example.com/", state
             )
 
-    @pytest.mark.asyncio
-    async def test_expired_state(self):
-        """handle_oauth_callback raises ValueError for expired state."""
-        state_token = generate_state_token(_TEST_KEY)
-        _pending_states[state_token] = OAuthPendingState(
-            patron_npub="npub1patron",
-            horizon_user_id="user-1",
-            created_at=time.time() - 700,  # expired
+        assert result == "xyz"
+        mock_http.get.assert_called_once_with(
+            "https://collector.example.com/oauth/retrieve",
+            params={"state": state},
         )
-
-        with pytest.raises(ValueError, match="expired or not found"):
-            await handle_oauth_callback(
-                code="auth-code",
-                state=state_token,
-                signing_key=_TEST_KEY,
-                client_id="key",
-                client_secret="secret",
-                redirect_uri="https://example.com/cb",
-            )
-
-
-# ---------------------------------------------------------------------------
-# build_authorize_url test
-# ---------------------------------------------------------------------------
-
-
-class TestBuildAuthorizeUrl:
-    """Tests for build_authorize_url."""
-
-    def test_constructs_url(self):
-        """build_authorize_url includes all required params."""
-        url = build_authorize_url("my-key", "https://example.com/cb", "state123")
-        assert "client_id=my-key" in url
-        assert "redirect_uri=" in url
-        assert "state=state123" in url
-        assert "response_type=code" in url
-        assert "scope=readonly" in url
-        assert url.startswith("https://api.schwabapi.com/v1/oauth/authorize?")
