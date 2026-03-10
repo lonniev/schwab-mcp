@@ -35,6 +35,7 @@ All brokerage tools are read-only. No orders are placed.
 - **Multi-tenant**: operator delivers `app_key` / `secret` via Secure Courier (`service="schwab-operator"`); each user delivers `token_json` + `account_hash` via Secure Courier (`service="schwab"`). No Schwab credentials in env vars
 - **Direct httpx**: thin `SchwabClient` wrapper with bearer auth and proactive token refresh (no third-party Schwab SDK)
 - **Tollbooth DPYC**: pre-funded Lightning balances, Authority-certified purchase orders, NeonVault (Postgres) for ledger persistence
+- **Registry discovery**: OAuth2 collector URL resolved from DPYC registry at runtime (no `OAUTH_COLLECTOR_URL` env var needed)
 
 ## Patron Onboarding — Getting Your Schwab Credentials
 
@@ -157,7 +158,7 @@ curl http://localhost:8000/mcp
 uv run pytest tests/ -v
 ```
 
-65+ tests covering all tools, the httpx client, vault, auth, OAuth flow, server credit gating, and Secure Courier callbacks.
+79 tests covering all tools, the httpx client, vault, auth, OAuth flow, server credit gating, registry-based collector discovery, and Secure Courier callbacks.
 
 ## Project Structure
 
