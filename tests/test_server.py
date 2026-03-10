@@ -623,7 +623,11 @@ class TestCheckOAuthViaCollector:
         # Verify npub was passed to set_session
         mock_set_session.assert_called_once()
         call_kwargs = mock_set_session.call_args
-        assert call_kwargs.kwargs.get("npub") == "npub1patron" or call_kwargs[1].get("npub") == "npub1patron"
+        npub_match = (
+            call_kwargs.kwargs.get("npub") == "npub1patron"
+            or call_kwargs[1].get("npub") == "npub1patron"
+        )
+        assert npub_match
 
     @pytest.mark.asyncio
     async def test_returns_error_when_registry_fails(self):
