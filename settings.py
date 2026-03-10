@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     # Commerce vault backend
     neon_database_url: str | None = None  # Serverless Postgres
 
+    # OAuth2 callback collector URL (e.g., "https://tollbooth-oauth2-collector.fastmcp.app")
+    oauth_collector_url: str | None = None
+
     # Secure Courier (Nostr DM credential exchange)
     tollbooth_nostr_operator_nsec: str | None = None
     tollbooth_nostr_relays: str | None = None  # Comma-separated relay URLs

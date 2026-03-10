@@ -36,7 +36,7 @@ mcp = FastMCP(
         "   **Option A — OAuth (recommended):**\n"
         "   - Call `begin_oauth(patron_npub=<your_npub>)` to get an authorization URL\n"
         "   - Open the URL in your browser and log in to Schwab\n"
-        "   - Call `check_oauth_status()` to confirm session activation\n\n"
+        "   - Call `check_oauth_status(patron_npub=<your_npub>)` to confirm session activation\n\n"
         "   **Option B — Manual Secure Courier:**\n"
         "   - Get your **patron npub** from the dpyc-oracle's how_to_join() tool\n"
         "   - Call `request_credential_channel(recipient_npub=<patron_npub>)` "
@@ -280,29 +280,6 @@ async def _ensure_operator_credentials() -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# HMAC signing key for OAuth state tokens
-# ---------------------------------------------------------------------------
-
-_signing_key: bytes | None = None
-
-
-def _get_signing_key() -> bytes:
-    """Derive an HMAC signing key from sha256(operator_nsec)."""
-    global _signing_key
-    if _signing_key is not None:
-        return _signing_key
-
-    import hashlib
-
-    settings = _get_settings()
-    nsec = settings.tollbooth_nostr_operator_nsec
-    if not nsec:
-        raise RuntimeError("TOLLBOOTH_NOSTR_OPERATOR_NSEC not set — cannot derive signing key.")
-    _signing_key = hashlib.sha256(nsec.encode()).digest()
-    return _signing_key
-
-
-# ---------------------------------------------------------------------------
 # Horizon auth helpers
 # ---------------------------------------------------------------------------
 
@@ -330,17 +307,14 @@ def _require_user_id() -> str:
 
 
 def _get_redirect_uri() -> str:
-    """Derive the OAuth redirect URI from the current HTTP request.
-
-    Respects reverse-proxy headers (Horizon, nginx) and falls back to
-    localhost for local dev.
-    """
-    from fastmcp.server.dependencies import get_http_headers
-
-    headers = get_http_headers(include_all=True)
-    proto = headers.get("x-forwarded-proto", "https")
-    host = headers.get("x-forwarded-host") or headers.get("host", "127.0.0.1:8000")
-    return f"{proto}://{host}/oauth/callback"
+    """Return the OAuth redirect URI pointing to the external collector."""
+    settings = _get_settings()
+    if not settings.oauth_collector_url:
+        raise RuntimeError(
+            "OAUTH_COLLECTOR_URL is not configured. "
+            "Set it to your deployed tollbooth-oauth2-collector URL."
+        )
+    return f"{settings.oauth_collector_url.rstrip('/')}/oauth/callback"
 
 
 def _get_effective_user_id() -> str:
@@ -1175,6 +1149,73 @@ async def check_balance() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# OAuth collector helper
+# ---------------------------------------------------------------------------
+
+
+async def _check_oauth_via_collector(user_id: str, patron_npub: str) -> dict[str, Any]:
+    """Poll the external OAuth2 collector for the auth code, then activate session.
+
+    Uses the patron's npub as the OAuth state parameter — no server-side
+    pending-state storage needed.
+    """
+    from oauth_flow import (
+        exchange_code_for_token,
+        fetch_account_hash,
+        retrieve_code_from_collector,
+    )
+
+    settings = _get_settings()
+    if not settings.oauth_collector_url:
+        return {"success": False, "error": "OAUTH_COLLECTOR_URL is not configured."}
+
+    code = await retrieve_code_from_collector(settings.oauth_collector_url, patron_npub)
+    if code is None:
+        return {
+            "status": "pending",
+            "message": "Waiting for browser authorization. Open the URL from begin_oauth.",
+        }
+
+    # Exchange code for token
+    try:
+        op_creds = await _ensure_operator_credentials()
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    redirect_uri = _get_redirect_uri()
+
+    try:
+        token = await exchange_code_for_token(
+            code=code,
+            client_id=op_creds["client_id"],
+            client_secret=op_creds["client_secret"],
+            redirect_uri=redirect_uri,
+        )
+        account_hash = await fetch_account_hash(token["access_token"])
+    except Exception as exc:
+        return {"status": "failed", "error": str(exc)}
+
+    # Activate session
+    import json
+
+    from vault import _create_client, set_session
+
+    token_json = json.dumps(token)
+    client = _create_client(
+        op_creds["client_id"],
+        op_creds["client_secret"],
+        token_json,
+        api_base=settings.schwab_trader_api,
+    )
+    set_session(user_id, token_json, account_hash, client, npub=patron_npub)
+
+    # Seed balance for new users
+    await _seed_balance(patron_npub)
+
+    return {"status": "completed", "message": "Session activated successfully."}
+
+
+# ---------------------------------------------------------------------------
 # MCP Tools — OAuth Flow (Free)
 # ---------------------------------------------------------------------------
 
@@ -1184,132 +1225,48 @@ async def begin_oauth(patron_npub: str) -> dict[str, Any]:
     """Start the OAuth2 authorization flow to connect your Schwab account.
 
     Returns an authorization URL — open it in your browser to log in to
-    Schwab and authorize. After authorizing, call check_oauth_status to
-    confirm your session is active.
+    Schwab and authorize. After authorizing, call check_oauth_status with
+    the same patron_npub to confirm your session is active.
 
     Args:
         patron_npub: Your DPYC patron Nostr public key (npub1...).
     """
-    try:
-        user_id = _require_user_id()
-    except ValueError as e:
-        return {"success": False, "error": str(e)}
-
     try:
         op_creds = await _ensure_operator_credentials()
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
     try:
-        signing_key = _get_signing_key()
+        redirect_uri = _get_redirect_uri()
     except RuntimeError as e:
         return {"success": False, "error": str(e)}
 
     from oauth_flow import begin_oauth_flow
 
     return begin_oauth_flow(
-        horizon_user_id=user_id,
         patron_npub=patron_npub,
         client_id=op_creds["client_id"],
-        redirect_uri=_get_redirect_uri(),
-        signing_key=signing_key,
+        redirect_uri=redirect_uri,
     )
 
 
 @tool
-async def check_oauth_status() -> dict[str, Any]:
+async def check_oauth_status(patron_npub: str) -> dict[str, Any]:
     """Check whether your OAuth authorization flow has completed.
 
     Call this after opening the authorization URL from begin_oauth
-    and completing the Schwab login in your browser.
+    and completing the Schwab login in your browser. Polls the external
+    OAuth2 collector for the authorization code and activates the session.
+
+    Args:
+        patron_npub: The same DPYC patron npub used in begin_oauth.
     """
     try:
         user_id = _require_user_id()
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
-    from oauth_flow import check_oauth_status_for_user
-
-    return check_oauth_status_for_user(user_id)
-
-
-# ---------------------------------------------------------------------------
-# OAuth callback route
-# ---------------------------------------------------------------------------
-
-
-@mcp.custom_route("/oauth/callback", methods=["GET"])
-async def oauth_callback(request):
-    """Handle the Schwab OAuth2 redirect with authorization code."""
-    from starlette.responses import HTMLResponse
-
-    from oauth_flow import ERROR_HTML_TEMPLATE, SUCCESS_HTML, handle_oauth_callback
-
-    code = request.query_params.get("code")
-    state = request.query_params.get("state")
-
-    if not code or not state:
-        html = ERROR_HTML_TEMPLATE.format(error="Missing code or state parameter.")
-        return HTMLResponse(html, status_code=400)
-
-    try:
-        signing_key = _get_signing_key()
-        op_creds = await _ensure_operator_credentials()
-    except (RuntimeError, ValueError) as e:
-        html = ERROR_HTML_TEMPLATE.format(error=str(e))
-        return HTMLResponse(html, status_code=500)
-
-    # Derive redirect_uri from the incoming request (same origin the browser hit)
-    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host", "127.0.0.1:8000")
-    redirect_uri = f"{proto}://{host}/oauth/callback"
-
-    try:
-        pending = await handle_oauth_callback(
-            code=code,
-            state=state,
-            signing_key=signing_key,
-            client_id=op_creds["client_id"],
-            client_secret=op_creds["client_secret"],
-            redirect_uri=redirect_uri,
-        )
-    except ValueError as e:
-        html = ERROR_HTML_TEMPLATE.format(error=str(e))
-        return HTMLResponse(html, status_code=400)
-
-    if pending.error:
-        html = ERROR_HTML_TEMPLATE.format(error=pending.error)
-        return HTMLResponse(html, status_code=500)
-
-    # Activate session from the exchanged token
-    import json
-
-    from vault import _create_client, set_session
-
-    settings = _get_settings()
-    token = pending.result["token"]
-    account_hash = pending.result["account_hash"]
-    token_json = json.dumps(token)
-
-    client = _create_client(
-        op_creds["client_id"],
-        op_creds["client_secret"],
-        token_json,
-        api_base=settings.schwab_trader_api,
-    )
-
-    set_session(
-        pending.horizon_user_id,
-        token_json,
-        account_hash,
-        client,
-        npub=pending.patron_npub,
-    )
-
-    # Seed balance for new users
-    await _seed_balance(pending.patron_npub)
-
-    return HTMLResponse(SUCCESS_HTML)
+    return await _check_oauth_via_collector(user_id, patron_npub)
 
 
 # ---------------------------------------------------------------------------

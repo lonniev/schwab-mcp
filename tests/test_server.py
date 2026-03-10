@@ -434,95 +434,164 @@ class TestToolCosts:
 
 
 class TestGetRedirectUri:
-    """Tests for _get_redirect_uri helper."""
+    """Tests for _get_redirect_uri helper (external collector)."""
 
-    def test_derives_uri_from_forwarded_headers(self):
-        """_get_redirect_uri uses x-forwarded-proto and x-forwarded-host."""
-        mock_headers = {
-            "x-forwarded-proto": "https",
-            "x-forwarded-host": "schwab-mcp.fastmcp.app",
-            "host": "internal:8000",
-        }
-        with patch(
-            "fastmcp.server.dependencies.get_http_headers",
-            return_value=mock_headers,
-        ):
+    def test_uses_collector_url(self):
+        """_get_redirect_uri returns collector callback URL."""
+        mock_settings = MagicMock()
+        mock_settings.oauth_collector_url = "https://collector.fastmcp.app"
+
+        with patch("server._get_settings", return_value=mock_settings):
             from server import _get_redirect_uri
 
             result = _get_redirect_uri()
 
-        assert result == "https://schwab-mcp.fastmcp.app/oauth/callback"
+        assert result == "https://collector.fastmcp.app/oauth/callback"
 
-    def test_falls_back_to_host_header(self):
-        """_get_redirect_uri falls back to host header when no forwarded headers."""
-        mock_headers = {
-            "host": "localhost:8000",
-        }
-        with patch(
-            "fastmcp.server.dependencies.get_http_headers",
-            return_value=mock_headers,
-        ):
+    def test_strips_trailing_slash(self):
+        """_get_redirect_uri strips trailing slash from collector URL."""
+        mock_settings = MagicMock()
+        mock_settings.oauth_collector_url = "https://collector.fastmcp.app/"
+
+        with patch("server._get_settings", return_value=mock_settings):
             from server import _get_redirect_uri
 
             result = _get_redirect_uri()
 
-        assert result == "https://localhost:8000/oauth/callback"
+        assert result == "https://collector.fastmcp.app/oauth/callback"
 
-    def test_falls_back_to_defaults(self):
-        """_get_redirect_uri uses defaults when no headers available."""
-        with patch(
-            "fastmcp.server.dependencies.get_http_headers",
-            return_value={},
-        ):
+    def test_raises_when_not_configured(self):
+        """_get_redirect_uri raises RuntimeError when collector URL is not set."""
+        mock_settings = MagicMock()
+        mock_settings.oauth_collector_url = None
+
+        with patch("server._get_settings", return_value=mock_settings):
             from server import _get_redirect_uri
 
-            result = _get_redirect_uri()
+            with pytest.raises(RuntimeError, match="OAUTH_COLLECTOR_URL"):
+                _get_redirect_uri()
 
-        assert result == "https://127.0.0.1:8000/oauth/callback"
 
-
-class TestOAuthCallbackDeriveUri:
-    """Tests for oauth_callback route deriving redirect_uri from request."""
+class TestCheckOAuthViaCollector:
+    """Tests for _check_oauth_via_collector (npub-as-state, stateless)."""
 
     @pytest.mark.asyncio
-    async def test_callback_derives_redirect_uri_from_request(self):
-        """oauth_callback route derives redirect_uri from request headers."""
-        from unittest.mock import PropertyMock
-
-        mock_request = MagicMock()
-        mock_request.query_params = {"code": "auth-code-123", "state": "valid.state"}
-        mock_request.headers = {
-            "x-forwarded-proto": "https",
-            "x-forwarded-host": "schwab-mcp.fastmcp.app",
-            "host": "internal:8000",
-        }
-        mock_url = MagicMock()
-        mock_url.scheme = "http"
-        type(mock_request).url = PropertyMock(return_value=mock_url)
+    async def test_pending_when_code_not_ready(self):
+        """Returns pending when collector has no code yet."""
+        mock_settings = MagicMock()
+        mock_settings.oauth_collector_url = "https://collector.example.com"
 
         with (
-            patch("server._get_signing_key", return_value=b"key" * 8),
-            patch("server._ensure_operator_credentials", new_callable=AsyncMock,
-                  return_value={"client_id": "cid", "client_secret": "csec"}),
-            patch("oauth_flow.handle_oauth_callback", new_callable=AsyncMock) as mock_handle,
-            patch("server._get_settings") as mock_settings,
-            patch("server._seed_balance", new_callable=AsyncMock),
+            patch("server._get_settings", return_value=mock_settings),
+            patch(
+                "oauth_flow.retrieve_code_from_collector",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
         ):
-            mock_pending = MagicMock()
-            mock_pending.error = None
-            mock_pending.result = {
-                "token": {"access_token": "at", "refresh_token": "rt"},
-                "account_hash": "hash123",
-            }
-            mock_pending.horizon_user_id = "user-1"
-            mock_pending.patron_npub = "npub1test"
-            mock_handle.return_value = mock_pending
-            mock_settings.return_value = MagicMock(schwab_trader_api="https://api.schwabapi.com")
+            from server import _check_oauth_via_collector
 
-            from server import oauth_callback
+            result = await _check_oauth_via_collector("user-1", "npub1abc")
 
-            await oauth_callback(mock_request)
+        assert result["status"] == "pending"
 
-        # Verify handle_oauth_callback received the derived redirect_uri
-        call_kwargs = mock_handle.call_args[1]
-        assert call_kwargs["redirect_uri"] == "https://schwab-mcp.fastmcp.app/oauth/callback"
+    @pytest.mark.asyncio
+    async def test_completes_session_on_code_received(self):
+        """Activates session when collector returns an auth code."""
+        import time
+
+        mock_settings = MagicMock()
+        mock_settings.oauth_collector_url = "https://collector.example.com"
+        mock_settings.schwab_trader_api = "https://api.schwabapi.com"
+
+        mock_token = {
+            "access_token": "at-123",
+            "refresh_token": "rt-456",
+            "expires_at": time.time() + 1800,
+        }
+
+        mock_client = MagicMock()
+
+        with (
+            patch("server._get_settings", return_value=mock_settings),
+            patch(
+                "server._ensure_operator_credentials",
+                new_callable=AsyncMock,
+                return_value={"client_id": "cid", "client_secret": "csec"},
+            ),
+            patch("server._get_redirect_uri", return_value="https://collector.example.com/oauth/callback"),
+            patch(
+                "oauth_flow.retrieve_code_from_collector",
+                new_callable=AsyncMock,
+                return_value="auth-code-xyz",
+            ),
+            patch(
+                "oauth_flow.exchange_code_for_token",
+                new_callable=AsyncMock,
+                return_value=mock_token,
+            ),
+            patch(
+                "oauth_flow.fetch_account_hash",
+                new_callable=AsyncMock,
+                return_value="hash-abc",
+            ),
+            patch("vault._create_client", return_value=mock_client),
+            patch("vault.set_session") as mock_set_session,
+            patch("server._seed_balance", new_callable=AsyncMock, return_value=False),
+        ):
+            from server import _check_oauth_via_collector
+
+            result = await _check_oauth_via_collector("user-1", "npub1patron")
+
+        assert result["status"] == "completed"
+        assert "Session activated" in result["message"]
+        # Verify npub was passed to set_session
+        mock_set_session.assert_called_once()
+        call_kwargs = mock_set_session.call_args
+        assert call_kwargs.kwargs.get("npub") == "npub1patron" or call_kwargs[1].get("npub") == "npub1patron"
+
+    @pytest.mark.asyncio
+    async def test_returns_error_when_collector_not_configured(self):
+        """Returns error when OAUTH_COLLECTOR_URL is not set."""
+        mock_settings = MagicMock()
+        mock_settings.oauth_collector_url = None
+
+        with patch("server._get_settings", return_value=mock_settings):
+            from server import _check_oauth_via_collector
+
+            result = await _check_oauth_via_collector("user-1", "npub1abc")
+
+        assert result["success"] is False
+        assert "OAUTH_COLLECTOR_URL" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_returns_failed_on_token_exchange_error(self):
+        """Returns failed when token exchange raises an exception."""
+        mock_settings = MagicMock()
+        mock_settings.oauth_collector_url = "https://collector.example.com"
+
+        with (
+            patch("server._get_settings", return_value=mock_settings),
+            patch(
+                "server._ensure_operator_credentials",
+                new_callable=AsyncMock,
+                return_value={"client_id": "cid", "client_secret": "csec"},
+            ),
+            patch("server._get_redirect_uri", return_value="https://collector.example.com/oauth/callback"),
+            patch(
+                "oauth_flow.retrieve_code_from_collector",
+                new_callable=AsyncMock,
+                return_value="auth-code-xyz",
+            ),
+            patch(
+                "oauth_flow.exchange_code_for_token",
+                new_callable=AsyncMock,
+                side_effect=Exception("Token exchange failed"),
+            ),
+        ):
+            from server import _check_oauth_via_collector
+
+            result = await _check_oauth_via_collector("user-1", "npub1abc")
+
+        assert result["status"] == "failed"
+        assert "Token exchange failed" in result["error"]
