@@ -951,7 +951,7 @@ async def session_status() -> dict[str, Any]:
 
 @tool
 async def request_credential_channel(
-    service: str = "schwab",
+    service: str,
     recipient_npub: str | None = None,
 ) -> dict[str, Any]:
     """Open a Secure Courier channel for out-of-band credential delivery.
@@ -970,7 +970,7 @@ async def request_credential_channel(
     Your credentials never appear in this chat.
 
     Args:
-        service: Which credential template to use (default "schwab").
+        service: Which credential template to use ("schwab" or "schwab-operator").
         recipient_npub: Your **patron** Nostr public key (npub1...).
     """
     try:
@@ -995,7 +995,7 @@ async def request_credential_channel(
 @tool
 async def receive_credentials(
     sender_npub: str,
-    service: str = "schwab",
+    service: str,
 ) -> dict[str, Any]:
     """Pick up credentials delivered via the Secure Courier.
 
@@ -1007,7 +1007,7 @@ async def receive_credentials(
 
     Args:
         sender_npub: Your **patron** Nostr public key (npub1...).
-        service: Which credential template to match (default "schwab").
+        service: Which credential template to match ("schwab" or "schwab-operator").
     """
     try:
         courier = _get_courier_service()
@@ -1035,16 +1035,18 @@ async def receive_credentials(
 
 
 @tool
-async def forget_credentials(sender_npub: str, service: str = "schwab") -> dict[str, Any]:
-    """Delete vaulted credentials so you can re-deliver via Secure Courier.
+async def forget_credentials(sender_npub: str, service: str) -> dict[str, Any]:
+    """Delete vaulted AND in-memory credentials so you can re-deliver via Secure Courier.
 
     Use this when you've rotated your Schwab token and need to send fresh
     credentials through the diplomatic pouch.
 
     Args:
         sender_npub: Your Nostr public key (npub1...).
-        service: Which service's credentials to forget (default "schwab").
+        service: Which service's credentials to forget ("schwab" or "schwab-operator").
     """
+    global _operator_credentials
+
     try:
         courier = _get_courier_service()
     except (ValueError, RuntimeError) as e:
@@ -1055,6 +1057,18 @@ async def forget_credentials(sender_npub: str, service: str = "schwab") -> dict[
     )
     drained = await _drain_stale_dms(sender_npub, service)
     result["relay_dms_drained"] = drained
+
+    # Clear in-memory state — forget means forget
+    if service == "schwab-operator":
+        _operator_credentials = None
+        result["operator_credentials_cleared"] = True
+    elif service == "schwab":
+        user_id = _get_current_user_id()
+        if user_id:
+            from vault import clear_session
+            await clear_session(user_id)
+            result["session_cleared"] = True
+
     return result
 
 
