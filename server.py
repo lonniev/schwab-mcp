@@ -1243,6 +1243,14 @@ async def _check_oauth_via_collector(user_id: str, patron_npub: str) -> dict[str
     )
     set_session(user_id, token_json, account_hash, client, npub=patron_npub)
 
+    # Persist DPYC identity binding so cold-start restore works
+    try:
+        courier = _get_courier_service()
+        courier._sessions[user_id] = patron_npub
+        await courier._store_binding(user_id, "schwab", patron_npub)
+    except Exception:
+        pass  # Best-effort — session is active in-memory regardless
+
     # Seed balance for new users
     await _seed_balance(patron_npub)
 
