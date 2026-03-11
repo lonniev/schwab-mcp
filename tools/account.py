@@ -1,6 +1,6 @@
-"""Account tools — positions and balances."""
+"""Account tools — positions, balances, orders, and transactions."""
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from models import (
     AccountBalances,
@@ -291,3 +291,154 @@ async def get_account_balances(client: SchwabClient, account_hash: str) -> str:
         f"**Net Liquidation:** ${acct.net_liquidation:,.2f}\n"
         f"**Day P&L:** ${acct.day_pl:,.2f}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Orders
+# ---------------------------------------------------------------------------
+
+
+def _default_date_range(days_back: int = 30) -> tuple[str, str]:
+    """Return (from_date, to_date) ISO strings defaulting to last N days."""
+    now = datetime.now(timezone.utc)
+    return (now - timedelta(days=days_back)).strftime("%Y-%m-%dT00:00:00.000Z"), now.strftime(
+        "%Y-%m-%dT%H:%M:%S.000Z"
+    )
+
+
+def _format_order_leg(leg: dict) -> str:
+    """Format a single order leg for display."""
+    inst = leg.get("instrument", {})
+    symbol = inst.get("symbol", "?")
+    action = leg.get("instruction", "?")
+    qty = leg.get("quantity", 0)
+    return f"{action} {qty}x {symbol}"
+
+
+def _format_order(order: dict) -> str:
+    """Format a single order into a readable markdown line."""
+    order_id = order.get("orderId", "?")
+    status = order.get("status", "?")
+    order_type = order.get("orderType", "?")
+    entered = order.get("enteredTime", "")[:19]
+    price = order.get("price", order.get("stopPrice", 0))
+
+    legs = order.get("orderLegCollection", [])
+    leg_str = " / ".join(_format_order_leg(leg) for leg in legs)
+
+    filled_qty = order.get("filledQuantity", 0)
+    fill_price = order.get("orderActivityCollection", [{}])
+    avg_fill = ""
+    if fill_price:
+        execs = []
+        for activity in order.get("orderActivityCollection", []):
+            for exec_leg in activity.get("executionLegs", []):
+                execs.append(exec_leg.get("price", 0))
+        if execs:
+            avg_fill = f" @ ${sum(execs) / len(execs):.2f}"
+
+    return (
+        f"- **{order_id}** [{status}] {order_type} | {leg_str} | "
+        f"Price: ${price:.2f}{avg_fill} | Filled: {filled_qty} | {entered}"
+    )
+
+
+async def get_orders(
+    client: SchwabClient,
+    account_hash: str,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    status_filter: str | None = None,
+) -> str:
+    """Get order history. Defaults to last 30 days."""
+    if not from_date or not to_date:
+        from_date, to_date = _default_date_range(30)
+
+    orders = await client.get_orders(
+        account_hash, from_date, to_date, status=status_filter
+    )
+
+    if not orders:
+        return "No orders found in the specified date range."
+
+    lines = [f"## Orders ({len(orders)} found)"]
+    for order in orders:
+        lines.append(_format_order(order))
+
+    return "\n".join(lines)
+
+
+async def get_order(
+    client: SchwabClient,
+    account_hash: str,
+    order_id: str,
+) -> str:
+    """Get a single order by ID."""
+    order = await client.get_order(account_hash, order_id)
+    return _format_order(order)
+
+
+# ---------------------------------------------------------------------------
+# Transactions
+# ---------------------------------------------------------------------------
+
+
+def _format_transaction(txn: dict) -> str:
+    """Format a single transaction into a readable markdown line."""
+    txn_id = txn.get("activityId", txn.get("transactionId", "?"))
+    txn_type = txn.get("type", "?")
+    txn_date = txn.get("tradeDate", txn.get("transactionDate", ""))[:10]
+    description = txn.get("description", "")
+
+    net_amount = txn.get("netAmount", 0)
+
+    # Extract instrument info from transferItems
+    symbols = []
+    for item in txn.get("transferItems", []):
+        inst = item.get("instrument", {})
+        sym = inst.get("symbol", "")
+        if sym:
+            qty = item.get("amount", 0)
+            symbols.append(f"{qty}x {sym}" if qty else sym)
+
+    sym_str = " | ".join(symbols) if symbols else description
+
+    return (
+        f"- **{txn_id}** [{txn_type}] {txn_date} | {sym_str} | "
+        f"Net: ${net_amount:,.2f}"
+    )
+
+
+async def get_transactions(
+    client: SchwabClient,
+    account_hash: str,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    transaction_types: str | None = None,
+) -> str:
+    """Get transaction history. Defaults to last 30 days."""
+    if not from_date or not to_date:
+        from_date, to_date = _default_date_range(30)
+
+    txns = await client.get_transactions(
+        account_hash, from_date, to_date, transaction_types=transaction_types
+    )
+
+    if not txns:
+        return "No transactions found in the specified date range."
+
+    lines = [f"## Transactions ({len(txns)} found)"]
+    for txn in txns:
+        lines.append(_format_transaction(txn))
+
+    return "\n".join(lines)
+
+
+async def get_transaction(
+    client: SchwabClient,
+    account_hash: str,
+    transaction_id: str,
+) -> str:
+    """Get a single transaction by ID."""
+    txn = await client.get_transaction(account_hash, transaction_id)
+    return _format_transaction(txn)

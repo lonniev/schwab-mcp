@@ -7,7 +7,11 @@ from tools.account import (
     _parse_occ_symbol,
     _parse_option_symbol,
     get_account_balances,
+    get_order,
+    get_orders,
     get_positions,
+    get_transaction,
+    get_transactions,
 )
 
 
@@ -254,3 +258,164 @@ async def test_get_positions_without_explicit_option_fields():
     assert "480.0" in result
     assert "478.0" in result
     assert "DTE 7" in result
+
+
+# ---------------------------------------------------------------------------
+# Order history tests
+# ---------------------------------------------------------------------------
+
+
+def _mock_orders_response():
+    """Mock Schwab orders list response with a multi-leg spread order."""
+    return [
+        {
+            "orderId": 12345,
+            "status": "FILLED",
+            "orderType": "NET_CREDIT",
+            "enteredTime": "2026-03-01T10:30:00+0000",
+            "price": 1.30,
+            "filledQuantity": 1,
+            "orderLegCollection": [
+                {
+                    "instruction": "SELL_TO_OPEN",
+                    "quantity": 1,
+                    "instrument": {"symbol": "GLD_031826P480", "assetType": "OPTION"},
+                },
+                {
+                    "instruction": "BUY_TO_OPEN",
+                    "quantity": 1,
+                    "instrument": {"symbol": "GLD_031826P478", "assetType": "OPTION"},
+                },
+            ],
+            "orderActivityCollection": [
+                {
+                    "executionLegs": [
+                        {"price": 1.32},
+                    ]
+                }
+            ],
+        },
+        {
+            "orderId": 12346,
+            "status": "CANCELED",
+            "orderType": "LIMIT",
+            "enteredTime": "2026-03-02T14:00:00+0000",
+            "price": 150.00,
+            "filledQuantity": 0,
+            "orderLegCollection": [
+                {
+                    "instruction": "BUY",
+                    "quantity": 10,
+                    "instrument": {"symbol": "SPY", "assetType": "EQUITY"},
+                },
+            ],
+            "orderActivityCollection": [],
+        },
+    ]
+
+
+def _mock_orders_client(orders: list) -> AsyncMock:
+    client = AsyncMock()
+    client.get_orders.return_value = orders
+    client.get_order.return_value = orders[0] if orders else {}
+    return client
+
+
+async def test_get_orders_with_spread():
+    """Orders are parsed including multi-leg spreads."""
+    client = _mock_orders_client(_mock_orders_response())
+    result = await get_orders(client, "FAKE_HASH")
+
+    assert "12345" in result
+    assert "FILLED" in result
+    assert "SELL_TO_OPEN" in result
+    assert "BUY_TO_OPEN" in result
+    assert "GLD_031826P480" in result
+    assert "12346" in result
+    assert "CANCELED" in result
+    assert "2 found" in result
+
+
+async def test_get_orders_empty():
+    """Returns friendly message when no orders exist."""
+    client = AsyncMock()
+    client.get_orders.return_value = []
+    result = await get_orders(client, "FAKE_HASH")
+    assert "No orders found" in result
+
+
+async def test_get_order_single():
+    """Single order lookup returns formatted order."""
+    client = _mock_orders_client(_mock_orders_response())
+    result = await get_order(client, "FAKE_HASH", "12345")
+    assert "12345" in result
+    assert "FILLED" in result
+
+
+# ---------------------------------------------------------------------------
+# Transaction history tests
+# ---------------------------------------------------------------------------
+
+
+def _mock_transactions_response():
+    """Mock Schwab transactions list."""
+    return [
+        {
+            "activityId": 99001,
+            "type": "TRADE",
+            "tradeDate": "2026-03-01T00:00:00+0000",
+            "description": "Sold 1 GLD Put",
+            "netAmount": 130.00,
+            "transferItems": [
+                {
+                    "instrument": {"symbol": "GLD_031826P480", "assetType": "OPTION"},
+                    "amount": 1,
+                },
+            ],
+        },
+        {
+            "activityId": 99002,
+            "type": "DIVIDEND",
+            "tradeDate": "2026-03-05T00:00:00+0000",
+            "description": "CASH DIV ON 10 SHS",
+            "netAmount": 4.50,
+            "transferItems": [],
+        },
+    ]
+
+
+def _mock_transactions_client(txns: list) -> AsyncMock:
+    client = AsyncMock()
+    client.get_transactions.return_value = txns
+    client.get_transaction.return_value = txns[0] if txns else {}
+    return client
+
+
+async def test_get_transactions_with_trades():
+    """Transactions are parsed with instrument details."""
+    client = _mock_transactions_client(_mock_transactions_response())
+    result = await get_transactions(client, "FAKE_HASH")
+
+    assert "99001" in result
+    assert "TRADE" in result
+    assert "GLD_031826P480" in result
+    assert "130.00" in result
+    assert "99002" in result
+    assert "DIVIDEND" in result
+    assert "2 found" in result
+
+
+async def test_get_transactions_empty():
+    """Returns friendly message when no transactions exist."""
+    client = AsyncMock()
+    client.get_transactions.return_value = []
+    result = await get_transactions(client, "FAKE_HASH")
+    assert "No transactions found" in result
+
+
+async def test_get_transaction_single():
+    """Single transaction lookup returns formatted transaction."""
+    client = _mock_transactions_client(_mock_transactions_response())
+    result = await get_transaction(client, "FAKE_HASH", "99001")
+    assert "99001" in result
+    assert "TRADE" in result
