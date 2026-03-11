@@ -1297,11 +1297,29 @@ async def begin_oauth(patron_npub: str) -> dict[str, Any]:
 
     from oauth_flow import begin_oauth_flow
 
-    return begin_oauth_flow(
+    result = begin_oauth_flow(
         patron_npub=patron_npub,
         client_id=op_creds["client_id"],
         redirect_uri=redirect_uri,
     )
+
+    # Shorten the authorize URL for human-friendliness (best-effort)
+    if "authorize_url" in result:
+        try:
+            import httpx
+
+            resp = await httpx.AsyncClient().get(
+                "https://tinyurl.com/api-create.php",
+                params={"url": result["authorize_url"]},
+                timeout=5,
+            )
+            if resp.status_code == 200 and resp.text.startswith("https://"):
+                result["authorize_url_full"] = result["authorize_url"]
+                result["authorize_url"] = resp.text.strip()
+        except Exception:
+            pass  # Keep the full URL if shortener is unreachable
+
+    return result
 
 
 @tool
