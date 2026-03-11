@@ -13,6 +13,10 @@ Multi-tenant [MCP](https://modelcontextprotocol.io/) server exposing Charles Sch
 | `get_quote` | 5 api_sats | Real-time quotes for one or more symbols |
 | `get_option_chain` | 10 api_sats | Filtered option chain with Greeks, IV, OTM%, and OI threshold |
 | `get_price_history` | 10 api_sats | Historical OHLCV candle data |
+| `get_orders` | 15 api_sats | Order history with multi-leg spread support (default 30 days) |
+| `get_order` | 8 api_sats | Single order detail by ID |
+| `get_transactions` | 15 api_sats | Transaction history — trades, dividends, cash movements (default 30 days) |
+| `get_transaction` | 8 api_sats | Single transaction detail by ID |
 
 ### Free
 
@@ -37,77 +41,124 @@ All brokerage tools are read-only. No orders are placed.
 - **Tollbooth DPYC**: pre-funded Lightning balances, Authority-certified purchase orders, NeonVault (Postgres) for ledger persistence
 - **Registry discovery**: OAuth2 collector URL resolved from DPYC registry at runtime (no `OAUTH_COLLECTOR_URL` env var needed)
 
-## Patron Onboarding — Getting Your Schwab Credentials
+---
 
-Two credentials are needed to activate a patron session: `token_json` (the full OAuth token) and `account_hash` (Schwab's encrypted account identifier).
+## Getting Started
 
-### Option A — OAuth Flow (recommended)
+This guide covers the full Tollbooth onboarding path — from generating a Nostr identity to making your first brokerage data call. It applies to both **Operators** (who deploy schwab-mcp) and **Patrons** (who consume it through Claude.ai or another MCP client).
 
-The server handles the token exchange and session activation automatically:
+### 1. Get a Nostr Identity (npub)
 
-1. In your MCP client, call `begin_oauth(patron_npub=<your_npub>)` — returns a Schwab authorization URL
+Every participant in the DPYC ecosystem is identified by a **Nostr keypair** — no email, no password, no vendor lock-in.
+
+**What is an npub?** It's a public key in the [Nostr protocol](https://nostr.com/), encoded as a bech32 string starting with `npub1...`. Your corresponding private key (`nsec1...`) stays on your device. The npub is safe to share — it's how the system knows who you are.
+
+**How to generate one:**
+
+1. Install a Nostr client: [Primal](https://primal.net/) (iOS/Android/Web), [Damus](https://damus.io/) (iOS), or [Amethyst](https://github.com/vitorpamplona/amethyst) (Android)
+2. Create an account — the app generates your keypair automatically
+3. Find your npub in the app's profile/settings screen (it starts with `npub1...`)
+
+Alternatively, use a CLI key generator like [nak](https://github.com/fiatjaf/nak): `nak key generate`
+
+**Operators** should keep a separate npub for their service identity, distinct from their personal Nostr account.
+
+### 2. Register as a DPYC Citizen
+
+Before you can buy credits or operate a service, register your npub with the DPYC community:
+
+1. In Claude.ai (with the [DPYC Oracle](https://github.com/lonniev/dpyc-oracle) connected), call `how_to_join()` to learn about citizenship
+2. Follow the Oracle's instructions to register your npub
+
+Citizenship is free and gives you a portable identity across the entire Tollbooth network.
+
+### 3. For Operators — Set Up Your BTCPay Store
+
+The Operator collects Lightning payments from Patrons via [BTCPay Server](https://btcpayserver.org/). You need:
+
+- A BTCPay Server instance (self-hosted or hosted by your Authority)
+- A **Store ID** and **API Key** with invoice creation permissions
+
+Set these as environment variables (`BTCPAY_HOST`, `BTCPAY_STORE_ID`, `BTCPAY_API_KEY`) in your deployment.
+
+### 4. For Operators — Register with a Tollbooth Authority
+
+Every Operator is sponsored by an Authority in the DPYC trust chain. The Authority certifies your purchase orders and collects a small fee (default 2%).
+
+1. Connect to your Authority's MCP service (e.g., [tollbooth-authority](https://github.com/lonniev/tollbooth-authority))
+2. Call `register_operator(npub=<your_operator_npub>)` — creates your ledger entry
+3. The Authority approves your registration
+
+### 5. For Operators — Fund Your Certification Balance
+
+Before your service can issue credits to Patrons, you need cert-sats:
+
+1. Call `authority_purchase_credits(amount_sats=1000)` on your Authority — returns a Lightning invoice
+2. Pay the invoice with any Lightning wallet
+3. Call `authority_check_payment(invoice_id="...")` — confirms settlement and credits your balance
+
+Your cert-sat balance is consumed automatically when Patrons purchase credits from your service.
+
+### 6. For Operators — Deliver Schwab API Credentials (Secure Courier)
+
+The Operator must register a [Schwab Developer](https://developer.schwab.com/) app and deliver the API credentials via Secure Courier. Credentials **never appear in chat**.
+
+1. Call `request_credential_channel(service="schwab-operator", recipient_npub=<operator_npub>)` — a welcome DM arrives in your Nostr client
+2. In your Nostr client, reply to the DM with: `{"app_key": "YOUR_APP_KEY", "secret": "YOUR_SECRET"}`
+3. Call `receive_credentials(sender_npub=<operator_npub>, service="schwab-operator")` — credentials are vaulted
+
+This is a one-time setup per deployment.
+
+### 7. For Patrons — Buy Credits (api_sats)
+
+Patrons pre-fund a satoshi balance and consume brokerage tools against it — no per-request payment interruptions.
+
+1. Call `purchase_credits(amount_sats=500)` — returns a Lightning invoice with a checkout link
+2. Pay the invoice with any Lightning wallet (Phoenix, Breez, Zeus, etc.)
+3. Call `check_payment(invoice_id="...")` — confirms settlement and credits your balance
+
+Your balance depletes as you call paid tools. Recharge anytime with another `purchase_credits` call. Check your balance at any time with `check_balance` (free).
+
+### 8. For Patrons — Deliver Your Schwab OAuth Token
+
+You need to authorize schwab-mcp to read your Schwab account. Choose one method:
+
+**Option A — OAuth Flow (recommended):**
+
+1. Call `begin_oauth(patron_npub=<your_npub>)` — returns a Schwab authorization URL
 2. Open the URL in your browser and log in to Schwab
-3. Schwab redirects back to the server — token exchange and account lookup happen automatically
+3. Schwab redirects back to the server — token exchange happens automatically
 4. Call `check_oauth_status()` to confirm your session is active
 
 No curl commands, no copy-paste. Your credentials never appear in the chat.
 
-### Option B — Manual Secure Courier
+**Option B — Manual Secure Courier:**
 
-If the OAuth redirect is unreachable (e.g. firewalled local dev), you can deliver credentials manually:
-
-#### Step 1 — Authorization URL
-
-Open in your browser (substitute your App Key):
-
-```
-https://api.schwabapi.com/v1/oauth/authorize?response_type=code&client_id=YOUR_APP_KEY&scope=readonly&redirect_uri=https://127.0.0.1
-```
-
-Log in to Schwab and authorize. The browser redirects to an unreachable page — this is expected. Copy the `code` parameter from the URL bar:
-
-```
-https://127.0.0.1/?code=LONG_CODE_STRING&session=...
-```
-
-#### Step 2 — Token Exchange
-
-Run immediately (the code expires quickly):
-
-```bash
-curl -X POST https://api.schwabapi.com/v1/oauth/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -u "YOUR_APP_KEY:YOUR_SECRET" \
-  -d "grant_type=authorization_code" \
-  -d "code=LONG_CODE_STRING" \
-  -d "redirect_uri=https://127.0.0.1"
-```
-
-The full JSON response is your `token_json`.
-
-#### Step 3 — Get Account Hash
-
-```bash
-curl -X GET https://api.schwabapi.com/trader/v1/accounts/accountNumbers \
-  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-```
-
-The `hashValue` field is your `account_hash`.
-
-#### Step 4 — Deliver via Secure Courier
-
-In Claude.ai (or your MCP client):
+If the OAuth redirect is unreachable (e.g., firewalled local dev), you can deliver credentials manually via encrypted Nostr DM. See the [tollbooth-oauth2-collector](https://github.com/lonniev/tollbooth-oauth2-collector) companion repo for full instructions on generating `token_json` + `account_hash`, then:
 
 1. Call `request_credential_channel(recipient_npub=<your_npub>)` — a welcome DM arrives in your Nostr client
-2. Reply with:
-   ```json
-   {"token_json": "<paste full token JSON>", "account_hash": "<hashValue>"}
-   ```
+2. Reply with: `{"token_json": "<full token JSON>", "account_hash": "<hashValue>"}`
 3. Call `receive_credentials(sender_npub=<your_npub>)` — session activates
 
-Your credentials never appear in the chat. The `refresh_token` in `token_json` auto-renews access (7-day TTL from Schwab).
+### 9. Using Schwab Tools in Conversation
 
-## Setup
+Once your session is active, ask your AI agent naturally:
+
+- *"Show me my positions"* — calls `get_positions` (5 api_sats)
+- *"What's my account balance?"* — calls `get_balances` (5 api_sats)
+- *"Get a quote for AAPL and MSFT"* — calls `get_quote` (5 api_sats)
+- *"Show me the GLD option chain for next month"* — calls `get_option_chain` (10 api_sats)
+- *"What are my recent orders?"* — calls `get_orders` (15 api_sats)
+- *"Show me my trade history for the last week"* — calls `get_transactions` (15 api_sats)
+
+Free tools are always available:
+
+- *"What's my schwab-mcp balance?"* — calls `check_balance`
+- *"Show me my account statement"* — calls `account_statement`
+
+---
+
+## Setup (Developer)
 
 ### Prerequisites
 
@@ -158,13 +209,11 @@ curl http://localhost:8000/mcp
 uv run pytest tests/ -v
 ```
 
-79 tests covering all tools, the httpx client, vault, auth, OAuth flow, server credit gating, registry-based collector discovery, and Secure Courier callbacks.
-
 ## Project Structure
 
 ```
 schwab-mcp/
-  server.py            # FastMCP server, singletons, credit gating, 14 tool endpoints
+  server.py            # FastMCP server, singletons, credit gating, 18 tool endpoints
   schwab_client.py     # Thin async httpx client — bearer auth + token refresh
   vault.py             # Per-user session management (in-memory cache)
   auth.py              # CLI bootstrap message (credentials via Secure Courier)
@@ -172,7 +221,7 @@ schwab-mcp/
   settings.py          # pydantic-settings (env vars, .env file)
   models.py            # Pydantic response models
   tools/
-    account.py         # Positions + balances (spread detection)
+    account.py         # Positions, balances, orders, transactions (spread detection)
     market.py          # Quotes + price history
     options.py         # Option chain retrieval + filtering
   tests/
@@ -180,7 +229,7 @@ schwab-mcp/
     test_server.py         # Singletons, credit gating, Secure Courier callback
     test_vault.py          # Session management
     test_auth.py           # Client creation
-    test_account.py        # Position + balance parsing
+    test_account.py        # Position, balance, order, transaction parsing
     test_market.py         # Quote + price history formatting
     test_options.py        # Option chain filtering
 ```

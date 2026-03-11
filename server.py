@@ -45,7 +45,12 @@ mcp = FastMCP(
         "   - Call `receive_credentials(sender_npub=<patron_npub>)` to vault your credentials\n\n"
         "## Credits Model\n\n"
         "Tool calls cost api_sats per call. Auth and balance tools are always free. "
-        "Use `check_balance` to see your balance. Top up via `purchase_credits`."
+        "Use `check_balance` to see your balance. Top up via `purchase_credits`.\n\n"
+        "## History Endpoints\n\n"
+        "Order and transaction history are available via `get_orders`, `get_order`, "
+        "`get_transactions`, and `get_transaction`. These cost 15 api_sats (list) "
+        "or 8 api_sats (single) due to heavier data retrieval. "
+        "Default lookback is 30 days."
     ),
 )
 tool = make_slug_tool(mcp, "schwab")
@@ -113,6 +118,11 @@ TOOL_COSTS: dict[str, int] = {
     # Paid — HEAVY tier (10 api_sats)
     "get_option_chain": ToolTier.HEAVY,
     "get_price_history": ToolTier.HEAVY,
+    # Paid — history endpoints (higher cost for multi-record scans)
+    "get_orders": 15,
+    "get_order": 8,
+    "get_transactions": 15,
+    "get_transaction": 8,
 }
 
 
@@ -1531,6 +1541,160 @@ async def get_price_history(
         return result_text
     except Exception:
         await _rollback_debit("get_price_history")
+        raise
+
+
+@tool
+async def get_orders(
+    from_date: str = "",
+    to_date: str = "",
+    status_filter: str = "",
+) -> str | dict[str, Any]:
+    """Get order history for your account.
+
+    Returns orders with symbol, type, legs, status, fill price, and timestamps.
+    Multi-leg option spread orders include all legs. Defaults to last 30 days.
+
+    Costs 15 api_sats.
+
+    Args:
+        from_date: Start date (ISO 8601, e.g. "2026-01-01"). Defaults to 30 days ago.
+        to_date: End date (ISO 8601). Defaults to now.
+        status_filter: Optional status filter (e.g. "FILLED", "CANCELED", "WORKING").
+    """
+    gate = await _debit_or_error("get_orders")
+    if gate:
+        return gate
+
+    try:
+        user_id = _require_user_id()
+        session = _require_session(user_id)
+    except ValueError as e:
+        await _rollback_debit("get_orders")
+        return {"success": False, "error": str(e)}
+
+    try:
+        from tools.account import get_orders as _get_orders
+
+        result_text = await _get_orders(
+            session.client,
+            session.account_hash,
+            from_date=from_date or None,
+            to_date=to_date or None,
+            status_filter=status_filter or None,
+        )
+        return result_text
+    except Exception:
+        await _rollback_debit("get_orders")
+        raise
+
+
+@tool
+async def get_order(order_id: str) -> str | dict[str, Any]:
+    """Get details for a single order by ID.
+
+    Returns full order details including all legs, fills, and status.
+
+    Costs 8 api_sats.
+
+    Args:
+        order_id: The Schwab order ID.
+    """
+    gate = await _debit_or_error("get_order")
+    if gate:
+        return gate
+
+    try:
+        user_id = _require_user_id()
+        session = _require_session(user_id)
+    except ValueError as e:
+        await _rollback_debit("get_order")
+        return {"success": False, "error": str(e)}
+
+    try:
+        from tools.account import get_order as _get_order
+
+        result_text = await _get_order(session.client, session.account_hash, order_id)
+        return result_text
+    except Exception:
+        await _rollback_debit("get_order")
+        raise
+
+
+@tool
+async def get_transactions(
+    from_date: str = "",
+    to_date: str = "",
+    transaction_types: str = "",
+) -> str | dict[str, Any]:
+    """Get transaction history for your account.
+
+    Returns transactions including trades, dividends, and cash movements.
+    Defaults to last 30 days.
+
+    Costs 15 api_sats.
+
+    Args:
+        from_date: Start date (ISO 8601, e.g. "2026-01-01"). Defaults to 30 days ago.
+        to_date: End date (ISO 8601). Defaults to now.
+        transaction_types: Comma-separated types: TRADE, DIVIDEND, CASH_IN_OR_CASH_OUT, etc.
+    """
+    gate = await _debit_or_error("get_transactions")
+    if gate:
+        return gate
+
+    try:
+        user_id = _require_user_id()
+        session = _require_session(user_id)
+    except ValueError as e:
+        await _rollback_debit("get_transactions")
+        return {"success": False, "error": str(e)}
+
+    try:
+        from tools.account import get_transactions as _get_transactions
+
+        result_text = await _get_transactions(
+            session.client,
+            session.account_hash,
+            from_date=from_date or None,
+            to_date=to_date or None,
+            transaction_types=transaction_types or None,
+        )
+        return result_text
+    except Exception:
+        await _rollback_debit("get_transactions")
+        raise
+
+
+@tool
+async def get_transaction(transaction_id: str) -> str | dict[str, Any]:
+    """Get details for a single transaction by ID.
+
+    Costs 8 api_sats.
+
+    Args:
+        transaction_id: The Schwab transaction ID.
+    """
+    gate = await _debit_or_error("get_transaction")
+    if gate:
+        return gate
+
+    try:
+        user_id = _require_user_id()
+        session = _require_session(user_id)
+    except ValueError as e:
+        await _rollback_debit("get_transaction")
+        return {"success": False, "error": str(e)}
+
+    try:
+        from tools.account import get_transaction as _get_transaction
+
+        result_text = await _get_transaction(
+            session.client, session.account_hash, transaction_id,
+        )
+        return result_text
+    except Exception:
+        await _rollback_debit("get_transaction")
         raise
 
 

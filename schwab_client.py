@@ -118,6 +118,52 @@ class SchwabClient:
         params["symbol"] = symbol
         return await self._get("/marketdata/v1/chains", params)
 
+    async def get_orders(
+        self,
+        account_hash: str,
+        from_entered_time: str,
+        to_entered_time: str,
+        status: str | None = None,
+        max_results: int = 3000,
+    ) -> list[dict]:
+        """GET /trader/v1/accounts/{account_hash}/orders"""
+        params: dict[str, str | int] = {
+            "fromEnteredTime": from_entered_time,
+            "toEnteredTime": to_entered_time,
+            "maxResults": max_results,
+        }
+        if status:
+            params["status"] = status
+        return await self._get(f"/trader/v1/accounts/{account_hash}/orders", params)
+
+    async def get_order(self, account_hash: str, order_id: str) -> dict:
+        """GET /trader/v1/accounts/{account_hash}/orders/{orderId}"""
+        return await self._get(f"/trader/v1/accounts/{account_hash}/orders/{order_id}")
+
+    async def get_transactions(
+        self,
+        account_hash: str,
+        start_date: str,
+        end_date: str,
+        transaction_types: str | None = None,
+    ) -> list[dict]:
+        """GET /trader/v1/accounts/{account_hash}/transactions"""
+        params: dict[str, str] = {
+            "startDate": start_date,
+            "endDate": end_date,
+        }
+        if transaction_types:
+            params["types"] = transaction_types
+        return await self._get(
+            f"/trader/v1/accounts/{account_hash}/transactions", params
+        )
+
+    async def get_transaction(self, account_hash: str, transaction_id: str) -> dict:
+        """GET /trader/v1/accounts/{account_hash}/transactions/{transactionId}"""
+        return await self._get(
+            f"/trader/v1/accounts/{account_hash}/transactions/{transaction_id}"
+        )
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
