@@ -337,9 +337,16 @@ def _require_user_id() -> str:
 
 
 async def _get_redirect_uri() -> str:
-    """Return the OAuth redirect URI pointing to the external collector."""
-    collector_url = await _resolve_collector_url()
-    return f"{collector_url}/mcp/oauth/callback"
+    """Return the OAuth redirect URI from the DPYC registry."""
+    from tollbooth import resolve_service_by_name
+
+    try:
+        svc = await resolve_service_by_name("tollbooth-oauth2-callback")
+        return svc["url"]
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to resolve OAuth2 callback from registry: {exc}"
+        ) from exc
 
 
 def _get_effective_user_id() -> str:

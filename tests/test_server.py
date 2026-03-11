@@ -512,25 +512,30 @@ class TestGetRedirectUri:
 
     @pytest.mark.asyncio
     async def test_uses_registry_collector_url(self):
-        """_get_redirect_uri resolves collector URL from DPYC registry."""
+        """_get_redirect_uri resolves callback URL from DPYC registry."""
+        mock_svc = {
+            "url": "https://callback.web.val.run",
+            "npub": "npub1...",
+            "name": "tollbooth-oauth2-callback",
+        }
         with patch(
-            "server._resolve_collector_url",
+            "tollbooth.resolve_service_by_name",
             new_callable=AsyncMock,
-            return_value="https://collector.fastmcp.app",
+            return_value=mock_svc,
         ):
             from server import _get_redirect_uri
 
             result = await _get_redirect_uri()
 
-        assert result == "https://collector.fastmcp.app/mcp/oauth/callback"
+        assert result == "https://callback.web.val.run"
 
     @pytest.mark.asyncio
     async def test_raises_when_registry_fails(self):
         """_get_redirect_uri raises RuntimeError when registry lookup fails."""
         with patch(
-            "server._resolve_collector_url",
+            "tollbooth.resolve_service_by_name",
             new_callable=AsyncMock,
-            side_effect=RuntimeError("Failed to resolve OAuth2 collector from registry"),
+            side_effect=Exception("registry unavailable"),
         ):
             from server import _get_redirect_uri
 

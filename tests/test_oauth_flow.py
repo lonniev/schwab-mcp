@@ -225,21 +225,32 @@ class TestDecryptCollectorCode:
 
 
 class TestRetrieveCodeFromCollector:
-    """Tests for retrieve_code_from_collector."""
+    """Tests for retrieve_code_from_collector (MCP JSON-RPC via /mcp/)."""
 
     @pytest.mark.asyncio
     async def test_returns_decrypted_code_on_success(self):
         """Returns the decrypted code when collector has it."""
+        import json
+
         state = "npub1abc123"
         encrypted = _fake_encrypt("auth-code-abc", state)
 
+        sse_body = (
+            "event: message\n"
+            "data: "
+            + json.dumps({
+                "jsonrpc": "2.0", "id": 1,
+                "result": {"structuredContent": {"found": True, "code": encrypted}},
+            })
+            + "\n\n"
+        )
+
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"code": encrypted}
-        mock_response.raise_for_status = MagicMock()
+        mock_response.text = sse_body
 
         mock_http = AsyncMock()
-        mock_http.get.return_value = mock_response
+        mock_http.post.return_value = mock_response
         mock_http.__aenter__ = AsyncMock(return_value=mock_http)
         mock_http.__aexit__ = AsyncMock(return_value=False)
 
@@ -249,19 +260,30 @@ class TestRetrieveCodeFromCollector:
             )
 
         assert result == "auth-code-abc"
-        mock_http.get.assert_called_once_with(
-            "https://collector.example.com/oauth/retrieve",
-            params={"state": state},
-        )
+        call_args = mock_http.post.call_args
+        assert call_args[0][0] == "https://collector.example.com/mcp/"
 
     @pytest.mark.asyncio
-    async def test_returns_none_on_404(self):
+    async def test_returns_none_when_not_found(self):
         """Returns None when collector hasn't received the code yet."""
+        import json
+
+        sse_body = (
+            "event: message\n"
+            "data: "
+            + json.dumps({
+                "jsonrpc": "2.0", "id": 1,
+                "result": {"structuredContent": {"found": False, "error": "not found or expired"}},
+            })
+            + "\n\n"
+        )
+
         mock_response = MagicMock()
-        mock_response.status_code = 404
+        mock_response.status_code = 200
+        mock_response.text = sse_body
 
         mock_http = AsyncMock()
-        mock_http.get.return_value = mock_response
+        mock_http.post.return_value = mock_response
         mock_http.__aenter__ = AsyncMock(return_value=mock_http)
         mock_http.__aexit__ = AsyncMock(return_value=False)
 
@@ -275,16 +297,27 @@ class TestRetrieveCodeFromCollector:
     @pytest.mark.asyncio
     async def test_strips_trailing_slash(self):
         """Strips trailing slash from collector URL."""
+        import json
+
         state = "npub1xyz"
         encrypted = _fake_encrypt("xyz", state)
 
+        sse_body = (
+            "event: message\n"
+            "data: "
+            + json.dumps({
+                "jsonrpc": "2.0", "id": 1,
+                "result": {"structuredContent": {"found": True, "code": encrypted}},
+            })
+            + "\n\n"
+        )
+
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"code": encrypted}
-        mock_response.raise_for_status = MagicMock()
+        mock_response.text = sse_body
 
         mock_http = AsyncMock()
-        mock_http.get.return_value = mock_response
+        mock_http.post.return_value = mock_response
         mock_http.__aenter__ = AsyncMock(return_value=mock_http)
         mock_http.__aexit__ = AsyncMock(return_value=False)
 
@@ -294,6 +327,8 @@ class TestRetrieveCodeFromCollector:
             )
 
         assert result == "xyz"
+        call_args = mock_http.post.call_args
+        assert call_args[0][0] == "https://collector.example.com/mcp/"
         mock_http.get.assert_called_once_with(
             "https://collector.example.com/oauth/retrieve",
             params={"state": state},
