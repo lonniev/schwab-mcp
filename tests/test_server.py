@@ -522,7 +522,7 @@ class TestGetRedirectUri:
 
             result = await _get_redirect_uri()
 
-        assert result == "https://collector.fastmcp.app/oauth/callback"
+        assert result == "https://collector.fastmcp.app/mcp/oauth/callback"
 
     @pytest.mark.asyncio
     async def test_raises_when_registry_fails(self):

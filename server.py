@@ -339,7 +339,7 @@ def _require_user_id() -> str:
 async def _get_redirect_uri() -> str:
     """Return the OAuth redirect URI pointing to the external collector."""
     collector_url = await _resolve_collector_url()
-    return f"{collector_url}/oauth/callback"
+    return f"{collector_url}/mcp/oauth/callback"
 
 
 def _get_effective_user_id() -> str:
