@@ -11,14 +11,95 @@ from models import (
 from schwab_client import SchwabClient
 
 
+def _parse_occ_symbol(occ: str) -> dict:
+    """Parse an OCC option symbol like 'GLD   260318P00480000'.
+
+    Format: SYMBOL (padded to 6) + YYMMDD + C/P + strike*1000 (8 digits).
+    The symbol portion may be shorter than 6 chars with trailing spaces,
+    or Schwab may use a compact format like 'GLD_031826P480'.
+    """
+    import re
+
+    # Try compact Schwab format: UNDERLYING_MMDDYYC{strike}
+    compact = re.match(
+        r"^([A-Z]+)_(\d{2})(\d{2})(\d{2})([CP])([\d.]+)$", occ,
+    )
+    if compact:
+        sym, mm, dd, yy, pc, strike = compact.groups()
+        return {
+            "underlying": sym,
+            "expiration": f"20{yy}-{mm}-{dd}",
+            "put_call": "PUT" if pc == "P" else "CALL",
+            "strike": float(strike),
+        }
+
+    # Try standard OCC format: 6-char padded symbol + YYMMDD + C/P + 8-digit strike
+    occ_match = re.match(
+        r"^(.{6})(\d{2})(\d{2})(\d{2})([CP])(\d{8})$", occ,
+    )
+    if occ_match:
+        sym, yy, mm, dd, pc, strike_raw = occ_match.groups()
+        return {
+            "underlying": sym.strip(),
+            "expiration": f"20{yy}-{mm}-{dd}",
+            "put_call": "PUT" if pc == "P" else "CALL",
+            "strike": int(strike_raw) / 1000.0,
+        }
+
+    return {}
+
+
 def _parse_option_symbol(instrument: dict) -> dict:
-    """Extract option details from a Schwab instrument dict."""
+    """Extract option details from a Schwab instrument dict.
+
+    Tries explicit fields first (strikePrice, expirationDate), then
+    falls back to parsing the OCC symbol which always encodes them.
+    """
+    symbol = instrument.get("symbol", "")
+    underlying = instrument.get("underlyingSymbol", "")
+    put_call = instrument.get("putCall", "UNKNOWN")
+    strike = instrument.get("strikePrice", 0.0)
+    expiration = instrument.get("expirationDate", "")
+
+    # Fall back to OCC symbol parsing if explicit fields are missing
+    if not strike or not expiration:
+        parsed = _parse_occ_symbol(symbol)
+        if parsed:
+            if not strike:
+                strike = parsed.get("strike", 0.0)
+            if not expiration:
+                expiration = parsed.get("expiration", "")
+            if not underlying:
+                underlying = parsed.get("underlying", "")
+            if put_call == "UNKNOWN":
+                put_call = parsed.get("put_call", "UNKNOWN")
+
+    # Also try parsing the description as last resort: "GLD 03/18/2026 480.0 P"
+    if (not strike or not expiration) and instrument.get("description"):
+        import re
+
+        desc = instrument["description"]
+        desc_match = re.match(
+            r"^([A-Z]+)\s+(\d{2}/\d{2}/\d{4})\s+([\d.]+)\s+([CP])$", desc,
+        )
+        if desc_match:
+            sym, date_str, strike_str, pc = desc_match.groups()
+            if not underlying:
+                underlying = sym
+            if not expiration:
+                mm, dd, yyyy = date_str.split("/")
+                expiration = f"{yyyy}-{mm}-{dd}"
+            if not strike:
+                strike = float(strike_str)
+            if put_call == "UNKNOWN":
+                put_call = "PUT" if pc == "P" else "CALL"
+
     return {
-        "symbol": instrument.get("symbol", ""),
-        "underlying": instrument.get("underlyingSymbol", ""),
-        "put_call": instrument.get("putCall", "UNKNOWN"),
-        "strike": instrument.get("strikePrice", 0.0),
-        "expiration": instrument.get("expirationDate", ""),
+        "symbol": symbol,
+        "underlying": underlying,
+        "put_call": put_call,
+        "strike": strike,
+        "expiration": expiration,
     }
 
 
