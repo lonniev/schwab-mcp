@@ -1243,13 +1243,25 @@ async def _check_oauth_via_collector(user_id: str, patron_npub: str) -> dict[str
     )
     set_session(user_id, token_json, account_hash, client, npub=patron_npub)
 
-    # Persist DPYC identity binding so cold-start restore works
+    # Persist credentials + identity binding so cold-start restore works.
+    # This mirrors what Secure Courier does on DM receipt: vault the
+    # credentials, then store the caller_id → npub session binding.
     try:
         courier = _get_courier_service()
         courier._sessions[user_id] = patron_npub
-        await courier._store_binding(user_id, "schwab", patron_npub)
-    except Exception:
-        pass  # Best-effort — session is active in-memory regardless
+        exchange = courier._exchange
+        if exchange._credential_vault is not None:
+            await exchange._credential_vault.ensure_schema()
+            await exchange._vault_store("schwab", patron_npub, {
+                "token_json": token_json,
+                "account_hash": account_hash,
+            })
+            await courier._store_binding(user_id, "schwab", patron_npub)
+            logger.info("OAuth credentials + binding persisted for %s", patron_npub)
+        else:
+            logger.warning("No credential vault — cannot persist OAuth session")
+    except Exception as exc:
+        logger.error("Failed to persist OAuth session: %s", exc)
 
     # Seed balance for new users
     await _seed_balance(patron_npub)
