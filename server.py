@@ -50,6 +50,18 @@ mcp = FastMCP(
 )
 tool = make_slug_tool(mcp, "schwab")
 
+_DPYC_BANNER = {
+    "powered_by": "DPYC Tollbooth — Don't Pester Your Customer",
+    "logo": "https://raw.githubusercontent.com/lonniev/dpyc-community/main/assets/dpyc-logo.png",
+    "tagline": (
+        "Pre-funded Lightning micropayments for AI tool calls. "
+        "No credit cards. No KYC. No interruptions. Just sats in, service out."
+    ),
+    "community": "https://github.com/lonniev/dpyc-community",
+    "join": "Call the dpyc-oracle's how_to_join() tool to get started.",
+    "oracle": "https://dpyc-oracle.fastmcp.app/mcp",
+}
+
 _ONBOARDING_NEXT_STEPS = {
     "action": "secure_courier_onboarding",
     "operator_setup": (
@@ -919,6 +931,7 @@ async def session_status() -> dict[str, Any]:
             "message": "Running in STDIO mode (local dev).",
             "personal_session": False,
             "operator_credentials": op_status,
+            "dpyc": _DPYC_BANNER,
         }
 
     session = get_session(user_id)
@@ -935,6 +948,7 @@ async def session_status() -> dict[str, Any]:
             result["dpyc_npub"] = npub
         else:
             result["dpyc_warning"] = "No DPYC identity active."
+        result["dpyc"] = _DPYC_BANNER
         return result
 
     return {
@@ -947,6 +961,7 @@ async def session_status() -> dict[str, Any]:
             "and never appear in this chat."
         ),
         "next_steps": _ONBOARDING_NEXT_STEPS,
+        "dpyc": _DPYC_BANNER,
     }
 
 
