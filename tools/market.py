@@ -1,4 +1,4 @@
-"""Market data tools — quotes and price history."""
+"""Market data tools — quotes, price history, movers, hours, instruments."""
 
 from schwab_client import SchwabClient
 
@@ -79,5 +79,131 @@ async def get_price_history(
 
     if len(candles) > 30:
         lines.append(f"\n_Showing last 30 of {len(candles)} candles._")
+
+    return "\n".join(lines)
+
+
+async def get_movers(
+    client: SchwabClient,
+    index: str = "$SPX",
+    sort: str = "PERCENT_CHANGE_UP",
+    frequency: int = 0,
+) -> str:
+    """Get top movers for a market index.
+
+    Args:
+        index: Index symbol — "$DJI", "$COMPX", or "$SPX".
+        sort: "PERCENT_CHANGE_UP", "PERCENT_CHANGE_DOWN", or "VOLUME".
+        frequency: 0 = all, 1 = 1–5%, 2 = 5–10%, 3 = 10–20%, 4 = 20%+.
+    """
+    data = await client.get_movers(index, sort=sort, frequency=frequency)
+
+    screeners = data.get("screeners", [])
+    if not screeners:
+        return f"No movers found for {index}."
+
+    lines = [f"**{index} Top Movers** ({sort.replace('_', ' ').title()})\n"]
+    lines.append("| Symbol | Description | Change % | Volume | Last |")
+    lines.append("|--------|-------------|----------|--------|------|")
+
+    for m in screeners[:20]:
+        sym = m.get("symbol", "?")
+        desc = m.get("description", "")[:30]
+        chg = m.get("netPercentChange", 0.0)
+        vol = m.get("totalVolume", 0)
+        last = m.get("lastPrice", 0.0)
+        lines.append(f"| {sym} | {desc} | {chg:+.2f}% | {vol:,} | ${last:.2f} |")
+
+    return "\n".join(lines)
+
+
+async def get_market_hours(
+    client: SchwabClient,
+    markets: str = "equity,option",
+    date: str | None = None,
+) -> str:
+    """Get market hours for one or more market types.
+
+    Args:
+        markets: Comma-separated: "equity", "option", "bond", "future", "forex".
+        date: ISO date to check (e.g. "2026-03-15"). Defaults to today.
+    """
+    data = await client.get_market_hours(markets, date=date)
+
+    lines: list[str] = []
+    for market_type, sessions in data.items():
+        for market_name, info in sessions.items():
+            product = info.get("product", market_name)
+            is_open = info.get("isOpen", False)
+            status = "OPEN" if is_open else "CLOSED"
+            lines.append(f"**{product}** — {status}")
+
+            for session_type in ("preMarket", "regularMarket", "postMarket"):
+                session_hours = info.get("sessionHours", {}).get(session_type, [])
+                for s in session_hours:
+                    start = s.get("start", "")[:16]
+                    end = s.get("end", "")[:16]
+                    label = session_type.replace("Market", " Market").title()
+                    lines.append(f"  {label}: {start} — {end}")
+
+    return "\n".join(lines) if lines else "No market hours data available."
+
+
+async def search_instruments(
+    client: SchwabClient,
+    symbol: str,
+    projection: str = "symbol-search",
+) -> str:
+    """Search for instruments by symbol or name.
+
+    Args:
+        symbol: Search term — ticker, partial name, or CUSIP.
+        projection: Search type: "symbol-search", "symbol-regex",
+            "desc-search", "desc-regex", or "fundamental".
+    """
+    data = await client.search_instruments(symbol, projection=projection)
+
+    instruments = data.get("instruments", [])
+    if not instruments:
+        return f"No instruments found for '{symbol}'."
+
+    lines = [f"**Instrument Search: '{symbol}'** ({len(instruments)} results)\n"]
+
+    for inst in instruments[:25]:
+        sym = inst.get("symbol", "?")
+        desc = inst.get("description", "")
+        asset_type = inst.get("assetType", "")
+        exchange = inst.get("exchange", "")
+        cusip = inst.get("cusip", "")
+
+        line = f"- **{sym}** ({asset_type}) — {desc}"
+        if exchange:
+            line += f" [{exchange}]"
+        if cusip:
+            line += f" CUSIP:{cusip}"
+
+        # Include fundamental data if present
+        fund = inst.get("fundamental", {})
+        if fund:
+            pe = fund.get("peRatio", 0)
+            div_yield = fund.get("divYield", 0)
+            mkt_cap = fund.get("marketCap", 0)
+            extras = []
+            if pe:
+                extras.append(f"P/E:{pe:.1f}")
+            if div_yield:
+                extras.append(f"Yield:{div_yield:.2f}%")
+            if mkt_cap:
+                if mkt_cap >= 1e9:
+                    extras.append(f"MktCap:${mkt_cap / 1e9:.1f}B")
+                else:
+                    extras.append(f"MktCap:${mkt_cap / 1e6:.0f}M")
+            if extras:
+                line += f" | {' | '.join(extras)}"
+
+        lines.append(line)
+
+    if len(instruments) > 25:
+        lines.append(f"\n_Showing 25 of {len(instruments)} results._")
 
     return "\n".join(lines)
