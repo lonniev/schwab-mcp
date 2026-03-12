@@ -113,6 +113,24 @@ class SchwabClient:
         params["symbol"] = symbol
         return await self._get("/marketdata/v1/pricehistory", params)
 
+    async def get_movers(self, index: str, **params) -> dict:
+        """GET /marketdata/v1/movers/{index}"""
+        return await self._get(f"/marketdata/v1/movers/{index}", params or None)
+
+    async def get_market_hours(self, markets: str, date: str | None = None) -> dict:
+        """GET /marketdata/v1/markets?markets=equity,option&date=..."""
+        params: dict[str, str] = {"markets": markets}
+        if date:
+            params["date"] = date
+        return await self._get("/marketdata/v1/markets", params)
+
+    async def search_instruments(self, symbol: str, projection: str = "symbol-search") -> dict:
+        """GET /marketdata/v1/instruments?symbol=...&projection=..."""
+        return await self._get(
+            "/marketdata/v1/instruments",
+            {"symbol": symbol, "projection": projection},
+        )
+
     async def get_option_chain(self, symbol: str, **params) -> dict:
         """GET /marketdata/v1/chains?symbol=SYM&..."""
         params["symbol"] = symbol

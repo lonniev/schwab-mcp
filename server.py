@@ -115,6 +115,9 @@ TOOL_COSTS: dict[str, int] = {
     "get_positions": ToolTier.WRITE,
     "get_balances": ToolTier.WRITE,
     "get_quote": ToolTier.WRITE,
+    "get_movers": ToolTier.WRITE,
+    "get_market_hours": ToolTier.WRITE,
+    "search_instruments": ToolTier.WRITE,
     # Paid — HEAVY tier (10 api_sats)
     "get_option_chain": ToolTier.HEAVY,
     "get_price_history": ToolTier.HEAVY,
@@ -1541,6 +1544,121 @@ async def get_price_history(
         return result_text
     except Exception:
         await _rollback_debit("get_price_history")
+        raise
+
+
+@tool
+async def get_movers(
+    index: str = "$SPX",
+    sort: str = "PERCENT_CHANGE_UP",
+    frequency: int = 0,
+) -> str | dict[str, Any]:
+    """Get top movers for a market index.
+
+    Shows the biggest gainers, losers, or most active by volume.
+
+    Costs 5 api_sats.
+
+    Args:
+        index: Index symbol — "$DJI", "$COMPX", or "$SPX".
+        sort: "PERCENT_CHANGE_UP", "PERCENT_CHANGE_DOWN", or "VOLUME".
+        frequency: 0 = all, 1 = 1-5%, 2 = 5-10%, 3 = 10-20%, 4 = 20%+.
+    """
+    gate = await _debit_or_error("get_movers")
+    if gate:
+        return gate
+
+    try:
+        user_id = _require_user_id()
+        session = _require_session(user_id)
+    except ValueError as e:
+        await _rollback_debit("get_movers")
+        return {"success": False, "error": str(e)}
+
+    try:
+        from tools.market import get_movers as _get_movers
+
+        result_text = await _get_movers(session.client, index, sort, frequency)
+        return result_text
+    except Exception:
+        await _rollback_debit("get_movers")
+        raise
+
+
+@tool
+async def get_market_hours(
+    markets: str = "equity,option",
+    date: str = "",
+) -> str | dict[str, Any]:
+    """Get market hours for equity, option, bond, future, or forex markets.
+
+    Useful for checking if markets are open, or pre/post-market session times.
+
+    Costs 5 api_sats.
+
+    Args:
+        markets: Comma-separated: "equity", "option", "bond", "future", "forex".
+        date: ISO date to check (e.g. "2026-03-15"). Defaults to today.
+    """
+    gate = await _debit_or_error("get_market_hours")
+    if gate:
+        return gate
+
+    try:
+        user_id = _require_user_id()
+        session = _require_session(user_id)
+    except ValueError as e:
+        await _rollback_debit("get_market_hours")
+        return {"success": False, "error": str(e)}
+
+    try:
+        from tools.market import get_market_hours as _get_market_hours
+
+        result_text = await _get_market_hours(
+            session.client, markets, date=date or None,
+        )
+        return result_text
+    except Exception:
+        await _rollback_debit("get_market_hours")
+        raise
+
+
+@tool
+async def search_instruments(
+    symbol: str,
+    projection: str = "symbol-search",
+) -> str | dict[str, Any]:
+    """Search for instruments by symbol, name, or CUSIP.
+
+    Use "fundamental" projection to include P/E, dividend yield, and market cap.
+
+    Costs 5 api_sats.
+
+    Args:
+        symbol: Search term — ticker, partial name, or CUSIP.
+        projection: "symbol-search", "symbol-regex", "desc-search",
+            "desc-regex", or "fundamental".
+    """
+    gate = await _debit_or_error("search_instruments")
+    if gate:
+        return gate
+
+    try:
+        user_id = _require_user_id()
+        session = _require_session(user_id)
+    except ValueError as e:
+        await _rollback_debit("search_instruments")
+        return {"success": False, "error": str(e)}
+
+    try:
+        from tools.market import search_instruments as _search_instruments
+
+        result_text = await _search_instruments(
+            session.client, symbol, projection=projection,
+        )
+        return result_text
+    except Exception:
+        await _rollback_debit("search_instruments")
         raise
 
 
