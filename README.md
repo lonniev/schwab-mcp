@@ -1,6 +1,12 @@
 # schwab-mcp
 
-Multi-tenant [MCP](https://modelcontextprotocol.io/) server exposing Charles Schwab brokerage data to AI agents via [FastMCP](https://github.com/jlowin/fastmcp). Monetized via [DPYC Tollbooth](https://github.com/lonniev/tollbooth-dpyc) Lightning micropayments. Serves over **Streamable HTTP** with direct async httpx calls to `api.schwabapi.com`.
+![Open Positions — Options Risk Profile](assets/hero-banner.png)
+
+Multi-tenant [MCP](https://modelcontextprotocol.io/) server exposing Charles Schwab brokerage data to AI agents via [FastMCP](https://github.com/jlowin/fastmcp). Monetized via [Tollbooth DPYC](https://github.com/lonniev/tollbooth-dpyc)&trade; Lightning micropayments. Serves over **Streamable HTTP** with direct async httpx calls to `api.schwabapi.com`.
+
+> Don't Pester Your Customer&trade; (DPYC&trade;) &mdash; API monetization for Entrepreneurial Bitcoin Advocates
+
+*Inspired by [The Phantom Tollbooth](https://en.wikipedia.org/wiki/The_Phantom_Tollbooth) by Norton Juster, illustrated by Jules Feiffer (1961).*
 
 ## Tools
 
@@ -22,7 +28,7 @@ Multi-tenant [MCP](https://modelcontextprotocol.io/) server exposing Charles Sch
 
 | Tool | Description |
 |------|-------------|
-| `session_status` | Check current session and DPYC identity state |
+| `session_status` | Check current session and DPYC&trade; identity state |
 | `begin_oauth` | Start OAuth2 flow — returns Schwab authorization URL |
 | `check_oauth_status` | Poll whether OAuth flow completed and session is active |
 | `request_credential_channel` | Open a Secure Courier channel for credential delivery via Nostr DM |
@@ -38,8 +44,8 @@ All brokerage tools are read-only. No orders are placed.
 
 - **Multi-tenant**: operator delivers `app_key` / `secret` via Secure Courier (`service="schwab-operator"`); each user delivers `token_json` + `account_hash` via Secure Courier (`service="schwab"`). No Schwab credentials in env vars
 - **Direct httpx**: thin `SchwabClient` wrapper with bearer auth and proactive token refresh (no third-party Schwab SDK)
-- **Tollbooth DPYC**: pre-funded Lightning balances, Authority-certified purchase orders, NeonVault (Postgres) for ledger persistence
-- **Registry discovery**: OAuth2 collector URL resolved from DPYC registry at runtime (no `OAUTH_COLLECTOR_URL` env var needed)
+- **Tollbooth DPYC&trade;**: pre-funded Lightning balances, Authority-certified purchase orders, NeonVault (Postgres) for ledger persistence
+- **Registry discovery**: OAuth2 collector URL resolved from DPYC&trade; registry at runtime (no `OAUTH_COLLECTOR_URL` env var needed)
 
 ---
 
@@ -49,13 +55,13 @@ This guide covers the full Tollbooth onboarding path — from generating a Nostr
 
 ### 1. Get a Nostr Identity (npub)
 
-Every participant in the DPYC ecosystem is identified by a **Nostr keypair** — no email, no password, no vendor lock-in.
+Every participant in the DPYC&trade; ecosystem is identified by a **Nostr keypair** — no email, no password, no vendor lock-in.
 
 **What is an npub?** It's a public key in the [Nostr protocol](https://nostr.com/), encoded as a bech32 string starting with `npub1...`. Your corresponding private key (`nsec1...`) stays on your device. The npub is safe to share — it's how the system knows who you are.
 
 **How to generate one:**
 
-1. Install a Nostr client: [Primal](https://primal.net/) (iOS/Android/Web), [Damus](https://damus.io/) (iOS), or [Amethyst](https://github.com/vitorpamplona/amethyst) (Android)
+1. Install [Oxcart](https://github.com/nickkawai/Oxcart) (the preferred Nostr client for DPYC&trade; workflows; other clients have not been tested)
 2. Create an account — the app generates your keypair automatically
 3. Find your npub in the app's profile/settings screen (it starts with `npub1...`)
 
@@ -63,9 +69,9 @@ Alternatively, use a CLI key generator like [nak](https://github.com/fiatjaf/nak
 
 **Operators** should keep a separate npub for their service identity, distinct from their personal Nostr account.
 
-### 2. Register as a DPYC Citizen
+### 2. Register as a DPYC&trade; Citizen
 
-Before you can buy credits or operate a service, register your npub with the DPYC community:
+Before you can buy credits or operate a service, register your npub with the DPYC&trade; community:
 
 1. In Claude.ai (with the [DPYC Oracle](https://github.com/lonniev/dpyc-oracle) connected), call `how_to_join()` to learn about citizenship
 2. Follow the Oracle's instructions to register your npub
@@ -83,7 +89,7 @@ Set these as environment variables (`BTCPAY_HOST`, `BTCPAY_STORE_ID`, `BTCPAY_AP
 
 ### 4. For Operators — Register with a Tollbooth Authority
 
-Every Operator is sponsored by an Authority in the DPYC trust chain. The Authority certifies your purchase orders and collects a small fee (default 2%).
+Every Operator is sponsored by an Authority in the DPYC&trade; trust chain. The Authority certifies your purchase orders and collects a small fee (default 2%).
 
 1. Connect to your Authority's MCP service (e.g., [tollbooth-authority](https://github.com/lonniev/tollbooth-authority))
 2. Call `register_operator(npub=<your_operator_npub>)` — creates your ledger entry
@@ -103,15 +109,15 @@ Your cert-sat balance is consumed automatically when Patrons purchase credits fr
 
 The Operator must register a [Schwab Developer](https://developer.schwab.com/) app and deliver the API credentials via Secure Courier. Credentials **never appear in chat**.
 
-1. Call `request_credential_channel(service="schwab-operator", recipient_npub=<operator_npub>)` — a welcome DM arrives in your Nostr client
-2. In your Nostr client, reply to the DM with: `{"app_key": "YOUR_APP_KEY", "secret": "YOUR_SECRET"}`
+1. Call `request_credential_channel(service="schwab-operator", recipient_npub=<operator_npub>)` — a welcome DM arrives in your Nostr client ([Oxcart](https://github.com/nickkawai/Oxcart))
+2. In Oxcart, reply to the DM with: `{"app_key": "YOUR_APP_KEY", "secret": "YOUR_SECRET"}`
 3. Call `receive_credentials(sender_npub=<operator_npub>, service="schwab-operator")` — credentials are vaulted
 
 This is a one-time setup per deployment.
 
 ### 7. For Patrons — Buy Credits (api_sats)
 
-Patrons pre-fund a satoshi balance and consume brokerage tools against it — no per-request payment interruptions.
+Patrons pre-fund a satoshi balance and consume brokerage tools against it — no per-request payment interruptions. This is the Don't Pester Your Customer&trade; philosophy in action.
 
 1. Call `purchase_credits(amount_sats=500)` — returns a Lightning invoice with a checkout link
 2. Pay the invoice with any Lightning wallet (Phoenix, Breez, Zeus, etc.)
@@ -136,7 +142,7 @@ No curl commands, no copy-paste. Your credentials never appear in the chat.
 
 If the OAuth redirect is unreachable (e.g., firewalled local dev), you can deliver credentials manually via encrypted Nostr DM. See the [tollbooth-oauth2-collector](https://github.com/lonniev/tollbooth-oauth2-collector) companion repo for full instructions on generating `token_json` + `account_hash`, then:
 
-1. Call `request_credential_channel(recipient_npub=<your_npub>)` — a welcome DM arrives in your Nostr client
+1. Call `request_credential_channel(recipient_npub=<your_npub>)` — a welcome DM arrives in Oxcart
 2. Reply with: `{"token_json": "<full token JSON>", "account_hash": "<hashValue>"}`
 3. Call `receive_credentials(sender_npub=<your_npub>)` — session activates
 
@@ -158,13 +164,28 @@ Free tools are always available:
 
 ---
 
+## DPYC&trade; Community Resources
+
+| Resource | Description |
+|----------|-------------|
+| [dpyc-community](https://github.com/lonniev/dpyc-community) | Community registry, governance, creed, and trademarks |
+| [tollbooth-dpyc](https://github.com/lonniev/tollbooth-dpyc) | Operator SDK — Python library for Tollbooth DPYC&trade; monetization |
+| [tollbooth-authority](https://github.com/lonniev/tollbooth-authority) | Authority MCP service — fee collection, Schnorr signing, purchase order certification |
+| [thebrain-mcp](https://github.com/lonniev/thebrain-mcp) | Personal Brain MCP service — the first city on the Lightning Turnpike |
+| [excalibur-mcp](https://github.com/lonniev/excalibur-mcp) | X (Twitter) posting service with Secure Courier |
+| [dpyc-oracle](https://github.com/lonniev/dpyc-oracle) | Community concierge — free membership, governance, and onboarding tools |
+| [DPYC Whitepaper](https://github.com/lonniev/dpyc-community/blob/main/docs/WHITEPAPER.md) | Technical whitepaper for the Tollbooth architecture |
+| [The Phantom Tollbooth on the Lightning Turnpike](https://stablecoin.myshopify.com/blogs/our-value/the-phantom-tollbooth-on-the-lightning-turnpike) | Narrative introduction to Tollbooth DPYC&trade; |
+
+---
+
 ## Setup (Developer)
 
 ### Prerequisites
 
 - Python 3.11+
 - A [Schwab Developer](https://developer.schwab.com/) app with API credentials
-- A Nostr client (Primal, Damus, Amethyst, etc.) for Secure Courier credential delivery
+- [Oxcart](https://github.com/nickkawai/Oxcart) Nostr client for Secure Courier credential delivery
 
 ### Install
 
@@ -234,6 +255,41 @@ schwab-mcp/
     test_options.py        # Option chain filtering
 ```
 
+## Prior Art & Attribution
+
+The methods, algorithms, and implementations contained in this repository may represent original work by Lonnie VanZandt, first published on March 11, 2026. This public disclosure establishes prior art under U.S. patent law (35 U.S.C. 102).
+
+All use, reproduction, or derivative work must comply with the Apache License 2.0 included in this repository and must provide proper attribution to the original author per the [NOTICE](NOTICE) file.
+
+### How to Attribute
+
+If you use or build upon this work, please include the following in your documentation or source:
+
+    Based on original work by Lonnie VanZandt and Claude.ai
+    Originally published: March 11, 2026
+    Source: https://github.com/lonniev/schwab-mcp
+    Licensed under Apache License 2.0
+
+Visit the technologist's virtual cafe for Bitcoin advocates and coffee aficionados at [stablecoin.myshopify.com](https://stablecoin.myshopify.com).
+
+### Patent Notice
+
+The author reserves all rights to seek patent protection for the novel methods and systems described herein. Public disclosure of this work establishes a priority date of March 11, 2026. Under the America Invents Act, the author retains a one-year grace period from the date of first public disclosure to file patent applications.
+
+**Note to potential filers:** This public repository and its full Git history serve as evidence of prior art. Any patent application covering substantially similar methods filed after the publication date of this repository may be subject to invalidation under 35 U.S.C. 102(a).
+
+## Further Reading
+
+[The Phantom Tollbooth on the Lightning Turnpike](https://stablecoin.myshopify.com/blogs/our-value/the-phantom-tollbooth-on-the-lightning-turnpike) — the full story of how we're monetizing the monetization of AI APIs, and then fading to the background.
+
+## Trademarks
+
+DPYC&trade;, Tollbooth DPYC&trade;, and Don't Pester Your Customer&trade; are trademarks of Lonnie VanZandt. See the [TRADEMARKS.md](https://github.com/lonniev/dpyc-community/blob/main/TRADEMARKS.md) in the dpyc-community repository for usage guidelines.
+
 ## License
 
-MIT
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE) for details.
+
+---
+
+*Because in the end, the tollbooth was never the destination. It was always just the beginning of the journey.*
