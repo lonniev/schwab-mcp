@@ -179,23 +179,19 @@ Free tools are always available:
 
 ---
 
-## Setup (Developer)
+## Deployment
 
-### Prerequisites
+schwab-mcp is designed to run on a cloud MCP host such as [FastMCP Cloud](https://www.fastmcp.cloud/) (Horizon by Prefect). Any MCP client (Claude.ai, Claude Desktop, Cursor, your own agent) can connect via Horizon:
 
-- Python 3.11+
-- A [Schwab Developer](https://developer.schwab.com/) app with API credentials
-- [Oxcart](https://github.com/nickkawai/Oxcart) Nostr client for Secure Courier credential delivery
-
-### Install
-
-```bash
-uv sync            # or: pip install -e ".[dev]"
+```
+https://www.fastmcp.cloud/server/lonniev/schwab-mcp
 ```
 
-### Environment Variables
+Authentication is automatic — Horizon OAuth identifies each patron. No API keys to manage on the client side.
 
-See [`.env.example`](.env.example) for the full list. Key variables:
+### Operator Environment Variables
+
+The Operator configures these on the cloud host (e.g., FastMCP Cloud environment settings). See [`.env.example`](.env.example) for the full list.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -210,23 +206,18 @@ All Schwab credentials flow exclusively through Secure Courier:
 
 No Schwab secrets ever appear in env vars or chat.
 
-## Run
+## Development
+
+### Prerequisites
+
+- Python 3.11+
+- A [Schwab Developer](https://developer.schwab.com/) app with API credentials
+- [Oxcart](https://github.com/nickkawai/Oxcart) Nostr client for Secure Courier credential delivery
+
+### Install & Test
 
 ```bash
-python server.py
-```
-
-The server binds to `0.0.0.0:8000` and serves MCP over Streamable HTTP.
-
-### Verify
-
-```bash
-curl http://localhost:8000/mcp
-```
-
-## Tests
-
-```bash
+uv sync            # or: pip install -e ".[dev]"
 uv run pytest tests/ -v
 ```
 
