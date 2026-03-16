@@ -13,3 +13,4 @@ token.json
 .pytest_cache/
 .mypy_cache/
 .mcp.json
+.claude/

@@ -16,6 +16,9 @@ from fastmcp import FastMCP
 from tollbooth.constants import ToolTier
 from tollbooth.slug_tools import make_slug_tool
 
+# _RESTRICTED may not be in older tollbooth releases — define sentinel
+_RESTRICTED = getattr(ToolTier, "RESTRICTED", -1)
+
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
@@ -111,6 +114,18 @@ TOOL_COSTS: dict[str, int] = {
     "check_payment": ToolTier.FREE,
     "begin_oauth": ToolTier.FREE,
     "check_oauth_status": ToolTier.FREE,
+    "service_status": ToolTier.FREE,
+    "account_statement": ToolTier.FREE,
+    "account_statement_infographic": ToolTier.READ,
+    "restore_credits": ToolTier.FREE,
+    "get_pricing_model": ToolTier.FREE,
+    "list_constraint_types": ToolTier.FREE,
+    "how_to_join": ToolTier.FREE,
+    "get_tax_rate": ToolTier.FREE,
+    "lookup_member": ToolTier.FREE,
+    "network_advisory": ToolTier.FREE,
+    # Restricted — operator only
+    "set_pricing_model": _RESTRICTED,
     # Paid — READ tier (5 api_sats)
     "get_positions": ToolTier.WRITE,
     "get_balances": ToolTier.WRITE,
@@ -794,6 +809,109 @@ def _get_btcpay():
 
 
 # ---------------------------------------------------------------------------
+# Pricing model store singleton
+# ---------------------------------------------------------------------------
+
+_pricing_store: Any = None
+
+
+def _get_pricing_store() -> Any:
+    global _pricing_store
+    if _pricing_store is not None:
+        return _pricing_store
+    from tollbooth.pricing_store import PricingModelStore
+
+    vault = _get_commerce_vault()
+    _pricing_store = PricingModelStore(neon_vault=vault)
+
+    try:
+        asyncio.ensure_future(_pricing_store.ensure_schema())
+    except RuntimeError:
+        pass
+    return _pricing_store
+
+
+# ---------------------------------------------------------------------------
+# ConstraintGate singleton
+# ---------------------------------------------------------------------------
+
+_gate: Any = None
+_gate_initialized: bool = False
+
+
+def _get_gate():
+    """Return the ConstraintGate singleton, or None if constraints are off."""
+    global _gate, _gate_initialized
+    if _gate_initialized:
+        return _gate
+    from tollbooth import ConstraintGate
+
+    settings = _get_settings()
+    config = settings.to_tollbooth_config()
+    if config.constraints_enabled:
+        _gate = ConstraintGate(config)
+    _gate_initialized = True
+    return _gate
+
+
+# ---------------------------------------------------------------------------
+# Demand tracking helpers
+# ---------------------------------------------------------------------------
+
+
+def _demand_window_key() -> str:
+    """Compute the current hourly demand window key (e.g. '2026-03-05T14:00')."""
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:00")
+
+
+async def _get_global_demand(tool_name: str) -> dict[str, int]:
+    """Read global demand for *tool_name* from Neon.  Returns {tool: count}.
+
+    On error or when vault is unconfigured, returns empty dict (base pricing).
+    """
+    try:
+        vault = _get_commerce_vault()
+        count = await vault.get_demand(tool_name, _demand_window_key())
+        return {tool_name: count}
+    except Exception:
+        return {}
+
+
+def _fire_and_forget_demand_increment(tool_name: str) -> None:
+    """Increment the demand counter for *tool_name* -- async, non-blocking."""
+
+    async def _increment() -> None:
+        try:
+            vault = _get_commerce_vault()
+            await vault.increment_demand(tool_name, _demand_window_key())
+        except Exception:
+            pass  # best-effort; stale counts just mean slightly off pricing
+
+    asyncio.create_task(_increment())
+
+
+# ---------------------------------------------------------------------------
+# Oracle delegation
+# ---------------------------------------------------------------------------
+
+
+async def _call_oracle(
+    tool_name: str, arguments: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Delegate a tool call to the DPYC Oracle."""
+    try:
+        from tollbooth.oracle_client import OracleClient
+        from tollbooth import resolve_oracle_service
+
+        oracle_url = await resolve_oracle_service()
+        return await OracleClient(oracle_url).call_tool(tool_name, arguments)
+    except Exception as e:
+        return {"success": False, "error": f"Oracle delegation failed: {e}"}
+
+
+# ---------------------------------------------------------------------------
 # Session resolution helpers
 # ---------------------------------------------------------------------------
 
@@ -820,9 +938,35 @@ async def _debit_or_error(tool_name: str) -> dict[str, Any] | None:
     """Check balance and debit credits for a paid tool call.
 
     Returns None to proceed, or an error dict to short-circuit.
+    Skips gating entirely in STDIO mode or when vault is unconfigured.
+
+    RESTRICTED tools (cost == _RESTRICTED) are operator-only:
+    allowed at cost 0 if the caller's npub matches the operator npub,
+    rejected otherwise.  STDIO mode bypasses the restriction.
     """
     cost = TOOL_COSTS.get(tool_name, 0)
+
+    # RESTRICTED tier: operator-only access gate
+    if cost == _RESTRICTED:
+        user_id = _get_current_user_id()
+        if not user_id:
+            return None  # STDIO mode — allow
+        try:
+            caller_npub = await _ensure_dpyc_session()
+        except ValueError as e:
+            return {"success": False, "error": str(e)}
+        if caller_npub != _get_operator_npub():
+            return {
+                "success": False,
+                "error": "This tool is restricted to the operator.",
+            }
+        return None  # operator — allow at cost 0
+
     if cost == 0:
+        return None
+
+    # STDIO mode — no gating
+    if not _get_current_user_id():
         return None
 
     try:
@@ -841,6 +985,26 @@ async def _debit_or_error(tool_name: str) -> dict[str, Any] | None:
             ),
         }
 
+    # ConstraintGate may modify the cost or deny the call
+    gate = _get_gate()
+    if gate and gate.enabled:
+        ledger = await cache.get(user_id)
+        demand = await _get_global_demand(tool_name)
+        denial, effective_cost = gate.check(
+            tool_name=tool_name,
+            base_cost=cost,
+            ledger=ledger,
+            npub=user_id,
+            global_demand=demand,
+        )
+        if denial is not None:
+            return denial
+        cost = effective_cost
+
+    # If constraint reduced cost to zero, skip debit
+    if cost == 0:
+        return None
+
     if not await cache.debit(user_id, tool_name, cost):
         try:
             ledger = await cache.get(user_id)
@@ -855,6 +1019,9 @@ async def _debit_or_error(tool_name: str) -> dict[str, Any] | None:
                 f"Use purchase_credits to add funds."
             ),
         }
+
+    # Successful debit — increment global demand counter (fire-and-forget)
+    _fire_and_forget_demand_increment(tool_name)
 
     return None
 
@@ -1817,9 +1984,213 @@ async def get_transaction(transaction_id: str) -> str | dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# MCP Tools — Operator / Pricing (Restricted + Free)
+# ---------------------------------------------------------------------------
+
+
+@tool
+async def get_pricing_model() -> dict[str, Any]:
+    """Get the active pricing model for this operator. Free."""
+    try:
+        store = _get_pricing_store()
+        operator = _get_operator_npub()
+    except (ValueError, RuntimeError) as e:
+        return {"status": "error", "error": str(e)}
+    from tollbooth.tools.pricing import get_pricing_model_tool
+
+    return await get_pricing_model_tool(store, operator)
+
+
+@tool
+async def set_pricing_model(model_json: str) -> dict[str, Any]:
+    """Set or update the active pricing model. Restricted — operator only."""
+    err = await _debit_or_error("set_pricing_model")
+    if err:
+        return err
+    try:
+        store = _get_pricing_store()
+        operator = _get_operator_npub()
+    except (ValueError, RuntimeError) as e:
+        return {"status": "error", "error": str(e)}
+
+    from tollbooth.tools.pricing import set_pricing_model_tool
+
+    return await set_pricing_model_tool(store, operator, model_json)
+
+
+@tool
+async def list_constraint_types() -> dict[str, Any]:
+    """List all available constraint types and their parameter schemas.
+
+    Returns the type, category, description, and parameter specs for
+    every constraint that can be used in a pricing pipeline.
+
+    Free — no credits required.
+    """
+    from tollbooth.tools.pricing import list_constraint_types as _list
+
+    return {"status": "ok", "constraint_types": _list()}
+
+
+# ---------------------------------------------------------------------------
+# MCP Tools — Account Statement / Credit Recovery
+# ---------------------------------------------------------------------------
+
+
+@tool
+async def account_statement() -> dict[str, Any]:
+    """Get a structured account statement showing balance, deposits, and usage.
+
+    Free — no credits required.
+    """
+    from tollbooth.tools import credits
+
+    try:
+        user_id = await _ensure_dpyc_session()
+        cache = _get_ledger_cache()
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    return await credits.account_statement_tool(cache, user_id)
+
+
+@tool
+async def account_statement_infographic() -> dict[str, Any]:
+    """Get a visual account statement infographic.
+
+    Cost: 1 api_sat (READ tier).
+    """
+    err = await _debit_or_error("account_statement_infographic")
+    if err:
+        return err
+
+    from tollbooth.tools import credits
+
+    try:
+        user_id = await _ensure_dpyc_session()
+        cache = _get_ledger_cache()
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    data = await credits.account_statement_tool(cache, user_id)
+    return {"success": True, "statement": data}
+
+
+@tool
+async def restore_credits(invoice_id: str) -> dict[str, Any]:
+    """Restore credits from a previously paid Lightning invoice.
+
+    Use this if credits were lost due to a server error after payment.
+    Safe to call multiple times — idempotent.
+
+    Free — no credits required.
+
+    Args:
+        invoice_id: The BTCPay invoice ID from purchase_credits.
+    """
+    from tollbooth.tools import credits
+
+    try:
+        user_id = await _ensure_dpyc_session()
+        btcpay = _get_btcpay()
+        cache = _get_ledger_cache()
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    settings = _get_settings()
+    return await credits.restore_credits_tool(
+        btcpay,
+        cache,
+        user_id,
+        invoice_id,
+        default_credit_ttl_seconds=settings.credit_ttl_seconds,
+    )
+
+
+# ---------------------------------------------------------------------------
+# MCP Tools — Service Status
+# ---------------------------------------------------------------------------
+
+
+@tool
+async def service_status() -> dict[str, Any]:
+    """Check the health and configuration of this Schwab MCP service.
+
+    Free — no authentication or credits required.
+    """
+    from tollbooth import ECOSYSTEM_LINKS
+
+    settings = _get_settings()
+    gate = _get_gate()
+    return {
+        "success": True,
+        "service": "schwab-mcp",
+        "slug": "schwab",
+        "constraints_enabled": gate.enabled if gate else False,
+        "btcpay_configured": settings.btcpay_host is not None,
+        "vault_configured": settings.neon_database_url is not None,
+        "seed_balance_sats": settings.seed_balance_sats,
+        "tool_costs": {k: int(v) for k, v in TOOL_COSTS.items() if v > 0},
+        "ecosystem_links": ECOSYSTEM_LINKS,
+    }
+
+
+# ---------------------------------------------------------------------------
+# MCP Tools — Oracle Delegation (Free)
+# ---------------------------------------------------------------------------
+
+
+@tool
+async def how_to_join() -> dict[str, Any]:
+    """Get DPYC onboarding instructions from the community Oracle.
+
+    Free — no authentication or credits required.
+    """
+    return await _call_oracle("how_to_join")
+
+
+@tool
+async def get_tax_rate() -> dict[str, Any]:
+    """Get the current DPYC certification tax rate from the Oracle.
+
+    Free — no authentication or credits required.
+    """
+    return await _call_oracle("get_tax_rate")
+
+
+@tool
+async def lookup_member(npub: str) -> dict[str, Any]:
+    """Look up a DPYC community member by their Nostr npub.
+
+    Can look up any role's npub — citizen, operator, or authority.
+    Free — no authentication or credits required.
+
+    Args:
+        npub: The Nostr public key (bech32 npub format) to look up.
+    """
+    return await _call_oracle("lookup_member", {"npub": npub})
+
+
+@tool
+async def network_advisory() -> dict[str, Any]:
+    """Get active network advisories from the DPYC Oracle.
+
+    Free — no authentication or credits required.
+    """
+    return await _call_oracle("network_advisory")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 
 if __name__ == "__main__":
+    from tollbooth import validate_operator_tools
+
+    missing = validate_operator_tools(mcp, "schwab")
+    if missing:
+        import sys
+
+        print(f"\u26a0 Missing base-catalog tools: {', '.join(missing)}", file=sys.stderr)
     mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)

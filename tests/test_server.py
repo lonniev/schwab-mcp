@@ -106,8 +106,10 @@ class TestDebitOrError:
         mock_cache.get = AsyncMock(return_value=mock_ledger)
 
         with (
+            patch("server._get_current_user_id", return_value="user123"),
             patch("server._ensure_dpyc_session", new_callable=AsyncMock, return_value="npub1x"),
             patch("server._get_ledger_cache", return_value=mock_cache),
+            patch("server._get_gate", return_value=None),
         ):
             from server import _debit_or_error
 
@@ -123,8 +125,10 @@ class TestDebitOrError:
         mock_cache.debit = AsyncMock(return_value=True)
 
         with (
+            patch("server._get_current_user_id", return_value="user123"),
             patch("server._ensure_dpyc_session", new_callable=AsyncMock, return_value="npub1x"),
             patch("server._get_ledger_cache", return_value=mock_cache),
+            patch("server._get_gate", return_value=None),
         ):
             from server import _debit_or_error
 
@@ -134,10 +138,13 @@ class TestDebitOrError:
     @pytest.mark.asyncio
     async def test_no_dpyc_session(self):
         """Paid tool without DPYC session returns error."""
-        with patch(
-            "server._ensure_dpyc_session",
-            new_callable=AsyncMock,
-            side_effect=ValueError("No DPYC identity"),
+        with (
+            patch("server._get_current_user_id", return_value="user123"),
+            patch(
+                "server._ensure_dpyc_session",
+                new_callable=AsyncMock,
+                side_effect=ValueError("No DPYC identity"),
+            ),
         ):
             from server import _debit_or_error
 

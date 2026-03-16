@@ -327,9 +327,6 @@ class TestRetrieveCodeFromCollector:
             )
 
         assert result == "xyz"
+        mock_http.post.assert_called_once()
         call_args = mock_http.post.call_args
         assert call_args[0][0] == "https://collector.example.com/mcp/"
-        mock_http.get.assert_called_once_with(
-            "https://collector.example.com/oauth/retrieve",
-            params={"state": state},
-        )

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from tollbooth.config import TollboothConfig
+
 
 class Settings(BaseSettings):
     """Schwab MCP server settings.
@@ -48,7 +50,23 @@ class Settings(BaseSettings):
     # Commerce vault backend
     neon_database_url: str | None = None  # Serverless Postgres
 
+    # Constraint Engine (opt-in)
+    constraints_enabled: bool = False
+    constraints_config: str | None = None  # JSON string
+
     # Secure Courier (Nostr DM credential exchange)
     tollbooth_nostr_operator_nsec: str | None = None
     tollbooth_nostr_relays: str | None = None  # Comma-separated relay URLs
+
+    def to_tollbooth_config(self) -> TollboothConfig:
+        """Build a TollboothConfig for passing to tollbooth library tools."""
+        return TollboothConfig(
+            btcpay_host=self.btcpay_host,
+            btcpay_store_id=self.btcpay_store_id,
+            btcpay_api_key=self.btcpay_api_key,
+            seed_balance_sats=self.seed_balance_sats,
+            credit_ttl_seconds=self.credit_ttl_seconds,
+            constraints_enabled=self.constraints_enabled,
+            constraints_config=self.constraints_config,
+        )
 
