@@ -934,7 +934,7 @@ def _require_session(user_id: str):
 # ---------------------------------------------------------------------------
 
 
-async def _debit_or_error(tool_name: str) -> dict[str, Any] | None:
+async def _debit_or_error(tool_name: str, **kwargs: Any) -> dict[str, Any] | None:
     """Check balance and debit credits for a paid tool call.
 
     Returns None to proceed, or an error dict to short-circuit.
@@ -956,6 +956,13 @@ async def _debit_or_error(tool_name: str) -> dict[str, Any] | None:
         except ValueError as e:
             return {"success": False, "error": str(e)}
         if caller_npub != _get_operator_npub():
+            # Allow if caller provides a valid operator proof
+            proof = kwargs.get("operator_proof")
+            if proof:
+                from tollbooth.operator_proof import verify_operator_proof
+
+                if verify_operator_proof(proof, _get_operator_npub(), tool_name):
+                    return None  # proof verified — allow
             return {
                 "success": False,
                 "error": "This tool is restricted to the operator.",
@@ -2003,8 +2010,28 @@ async def get_pricing_model() -> dict[str, Any]:
 
 @tool
 async def set_pricing_model(model_json: str) -> dict[str, Any]:
-    """Set or update the active pricing model. Restricted — operator only."""
-    err = await _debit_or_error("set_pricing_model")
+    """Set or update the active pricing model.
+
+    Free — operator self-service tool.
+
+    Args:
+        model_json: JSON string with pricing model data.
+            May include "operator_proof" — a signed Nostr kind-27235 event
+            JSON string proving operator identity when the caller's session
+            npub differs from the operator npub.
+    """
+    # Extract operator_proof from inside model_json if present
+    import json as _json
+    operator_proof = ""
+    try:
+        parsed = _json.loads(model_json)
+        if isinstance(parsed, dict) and "operator_proof" in parsed:
+            operator_proof = parsed.pop("operator_proof", "")
+            model_json = _json.dumps(parsed)
+    except (ValueError, TypeError):
+        pass
+
+    err = await _debit_or_error("set_pricing_model", operator_proof=operator_proof)
     if err:
         return err
     try:
