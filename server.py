@@ -2149,15 +2149,16 @@ async def service_status() -> dict[str, Any]:
     """
     from tollbooth import ECOSYSTEM_LINKS
 
-    versions: dict[str, str] = {
-        "schwab_mcp": importlib.metadata.version("schwab-mcp"),
-        "python": platform.python_version(),
-    }
-    for pkg in ("tollbooth-dpyc", "fastmcp"):
+    versions: dict[str, str] = {"python": platform.python_version()}
+    for name, pkg in [
+        ("schwab_mcp", "schwab-mcp"),
+        ("tollbooth_dpyc", "tollbooth-dpyc"),
+        ("fastmcp", "fastmcp"),
+    ]:
         try:
-            versions[pkg.replace("-", "_")] = importlib.metadata.version(pkg)
+            versions[name] = importlib.metadata.version(pkg)
         except importlib.metadata.PackageNotFoundError:
-            versions[pkg.replace("-", "_")] = "unknown"
+            versions[name] = "unknown"
 
     settings = _get_settings()
     gate = _get_gate()
