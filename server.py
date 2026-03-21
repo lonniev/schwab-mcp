@@ -9,7 +9,9 @@ via the full Tollbooth DPYC monetization stack (Lightning micropayments).
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
 import logging
+import platform
 from typing import Any
 
 from fastmcp import FastMCP
@@ -2147,12 +2149,23 @@ async def service_status() -> dict[str, Any]:
     """
     from tollbooth import ECOSYSTEM_LINKS
 
+    versions: dict[str, str] = {
+        "schwab_mcp": importlib.metadata.version("schwab-mcp"),
+        "python": platform.python_version(),
+    }
+    for pkg in ("tollbooth-dpyc", "fastmcp"):
+        try:
+            versions[pkg.replace("-", "_")] = importlib.metadata.version(pkg)
+        except importlib.metadata.PackageNotFoundError:
+            versions[pkg.replace("-", "_")] = "unknown"
+
     settings = _get_settings()
     gate = _get_gate()
     return {
         "success": True,
         "service": "schwab-mcp",
         "slug": "schwab",
+        "versions": versions,
         "constraints_enabled": gate.enabled if gate else False,
         "btcpay_configured": settings.btcpay_host is not None,
         "vault_configured": settings.neon_database_url is not None,
