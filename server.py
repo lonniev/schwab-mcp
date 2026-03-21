@@ -2084,25 +2084,58 @@ async def account_statement() -> dict[str, Any]:
 
 
 @tool
-async def account_statement_infographic() -> dict[str, Any]:
-    """Get a visual account statement infographic.
+async def account_statement_infographic(days: int = 30) -> dict[str, Any]:
+    """Generate a visual SVG infographic of your account statement.
+
+    Returns the same data as account_statement, rendered as a dark-themed
+    SVG graphic with balance hero, metrics cards, health gauge, tranche
+    table, and tool usage breakdown. Suitable for sharing or embedding.
 
     Cost: 1 api_sat (READ tier).
-    """
-    err = await _debit_or_error("account_statement_infographic")
-    if err:
-        return err
 
-    from tollbooth.tools import credits
+    Args:
+        days: Number of days of history to include (default 30).
+
+    Returns:
+        svg: The SVG markup string.
+        png_base64: Base64-encoded PNG (only when cairosvg is installed).
+        generated_at: ISO timestamp of generation.
+    """
+    gate = await _debit_or_error("account_statement_infographic")
+    if gate:
+        return gate
 
     try:
         user_id = await _ensure_dpyc_session()
         cache = _get_ledger_cache()
     except ValueError as e:
+        await _rollback_debit("account_statement_infographic")
         return {"success": False, "error": str(e)}
 
-    data = await credits.account_statement_tool(cache, user_id)
-    return {"success": True, "statement": data}
+    try:
+        from infographic import render_account_infographic, svg_to_png_base64
+        from tollbooth.tools import credits
+
+        data = await credits.account_statement_tool(cache, user_id, days=days)
+        if not data.get("success"):
+            await _rollback_debit("account_statement_infographic")
+            return data
+
+        svg = render_account_infographic(data)
+        result: dict[str, Any] = {
+            "success": True,
+            "svg": svg,
+            "generated_at": data.get("generated_at", ""),
+        }
+
+        png_b64 = svg_to_png_base64(svg)
+        if png_b64:
+            result["png_base64"] = png_b64
+
+        return await _with_warning(result)
+    except Exception:
+        await _rollback_debit("account_statement_infographic")
+        raise
 
 
 @tool
