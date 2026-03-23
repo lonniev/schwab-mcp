@@ -904,8 +904,8 @@ async def _call_oracle(
 ) -> dict[str, Any]:
     """Delegate a tool call to the DPYC Oracle."""
     try:
-        from tollbooth.oracle_client import OracleClient
         from tollbooth import resolve_oracle_service
+        from tollbooth.oracle_client import OracleClient
 
         oracle_url = await resolve_oracle_service()
         return await OracleClient(oracle_url).call_tool(tool_name, arguments)
@@ -2113,8 +2113,9 @@ async def account_statement_infographic(days: int = 30) -> dict[str, Any]:
         return {"success": False, "error": str(e)}
 
     try:
-        from infographic import render_account_infographic, svg_to_png_base64
         from tollbooth.tools import credits
+
+        from infographic import render_account_infographic, svg_to_png_base64
 
         data = await credits.account_statement_tool(cache, user_id, days=days)
         if not data.get("success"):

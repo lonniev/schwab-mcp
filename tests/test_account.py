@@ -214,7 +214,7 @@ class TestParseOptionSymbolFallback:
 async def test_get_positions_without_explicit_option_fields():
     """Positions parse correctly when Schwab omits strikePrice/expirationDate."""
     exp_occ = (date.today() + timedelta(days=7)).strftime("%y%m%d")
-    exp_iso = (date.today() + timedelta(days=7)).isoformat()
+    _ = (date.today() + timedelta(days=7)).isoformat()  # exp_iso unused but kept for reference
     data = {
         "securitiesAccount": {
             "positions": [

@@ -45,8 +45,8 @@ async def main() -> None:
 
     # 3. Connect to vault and check tables
     print("\n=== 3. Vault connectivity ===")
-    from tollbooth.vaults import NeonVault, NeonCredentialVault
     from tollbooth.credential_vault_backend import SessionBindingBackend
+    from tollbooth.vaults import NeonCredentialVault, NeonVault
 
     neon = NeonVault(database_url=settings.neon_database_url)
     cred_vault = NeonCredentialVault(neon_vault=neon)
