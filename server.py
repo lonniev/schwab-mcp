@@ -391,54 +391,14 @@ async def _get_redirect_uri() -> str:
         ) from exc
 
 
-def _get_effective_user_id() -> str:
-    """Return the npub for the current user. Required for credit operations."""
-    from vault import get_dpyc_npub
-
-    horizon_id = _get_current_user_id()
-    if not horizon_id:
-        return "stdio:0"
-
-    npub = get_dpyc_npub(horizon_id)
-    if not npub:
+def _resolve_npub(npub: str) -> str:
+    """Validate and return the npub. No fallback, no session cache."""
+    if not npub or not npub.startswith("npub1") or len(npub) < 60:
         raise ValueError(
-            "No DPYC identity active. Credit operations require an npub. "
-            "Call receive_credentials to complete the Secure Courier onboarding flow. "
-            "Credentials must NEVER appear in this chat."
+            "npub is required. Pass your Nostr public key (npub1...) "
+            "to identify yourself."
         )
     return npub
-
-
-async def _ensure_dpyc_session(npub: str | None = None) -> str:
-    """Return the patron's npub for credit operations.
-
-    Args:
-        npub: Explicit npub from the tool call. If provided and valid,
-              used directly (and cached for subsequent calls).
-
-    Falls back to courier restore, then session cache, then raises.
-    Returns "stdio:0" in STDIO mode for local dev.
-    """
-    if npub and npub.startswith("npub1") and len(npub) >= 60:
-        user_id = _get_current_user_id()
-        if user_id:
-            from vault import _dpyc_sessions
-            _dpyc_sessions[user_id] = npub
-        return npub
-
-    horizon_id = _get_current_user_id()
-    if not horizon_id:
-        return "stdio:0"
-
-    try:
-        courier = _get_courier_service()
-        return await courier.ensure_identity(horizon_id, service="schwab")
-    except ValueError:
-        raise
-    except Exception:
-        pass
-
-    return _get_effective_user_id()
 
 
 # ---------------------------------------------------------------------------
@@ -951,7 +911,7 @@ def _require_session(user_id: str):
 # ---------------------------------------------------------------------------
 
 
-async def _debit_or_error(tool_name: str, **kwargs: Any) -> dict[str, Any] | None:
+async def _debit_or_error(tool_name: str, npub: str = "", **kwargs: Any) -> dict[str, Any] | None:
     """Check balance and debit credits for a paid tool call.
 
     Returns None to proceed, or an error dict to short-circuit.
@@ -969,7 +929,7 @@ async def _debit_or_error(tool_name: str, **kwargs: Any) -> dict[str, Any] | Non
         if not user_id:
             return None  # STDIO mode — allow
         try:
-            caller_npub = await _ensure_dpyc_session()
+            caller_npub = _resolve_npub(npub)
         except ValueError as e:
             return {"success": False, "error": str(e)}
         if caller_npub != _get_operator_npub():
@@ -994,7 +954,7 @@ async def _debit_or_error(tool_name: str, **kwargs: Any) -> dict[str, Any] | Non
         return None
 
     try:
-        user_id = await _ensure_dpyc_session()
+        user_id = _resolve_npub(npub)
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
@@ -1050,14 +1010,14 @@ async def _debit_or_error(tool_name: str, **kwargs: Any) -> dict[str, Any] | Non
     return None
 
 
-async def _rollback_debit(tool_name: str) -> None:
+async def _rollback_debit(tool_name: str, npub: str = "") -> None:
     """Undo a debit when the downstream API call fails."""
     cost = TOOL_COSTS.get(tool_name, 0)
     if cost == 0:
         return
 
     try:
-        user_id = await _ensure_dpyc_session()
+        user_id = _resolve_npub(npub)
         cache = _get_ledger_cache()
         ledger = await cache.get(user_id)
     except Exception:
@@ -1067,12 +1027,12 @@ async def _rollback_debit(tool_name: str) -> None:
     cache.mark_dirty(user_id)
 
 
-async def _with_warning(result: dict[str, Any]) -> dict[str, Any]:
+async def _with_warning(result: dict[str, Any], npub: str = "") -> dict[str, Any]:
     """Attach a low-balance warning to a paid tool result if balance is low."""
     try:
         from tollbooth.tools.credits import compute_low_balance_warning
 
-        user_id = await _ensure_dpyc_session()
+        user_id = _resolve_npub(npub)
         cache = _get_ledger_cache()
         ledger = await cache.get(user_id)
         settings = _get_settings()
@@ -1116,7 +1076,7 @@ async def session_status() -> dict[str, Any]:
     Shows whether you have an active Schwab session, DPYC identity state,
     and next steps for onboarding if needed.
     """
-    from vault import get_dpyc_npub, get_session
+    from vault import get_session
 
     user_id = _get_current_user_id()
 
@@ -1147,11 +1107,10 @@ async def session_status() -> dict[str, Any]:
             "message": "Personal Schwab credentials active.",
             "operator_credentials": op_status,
         }
-        npub = get_dpyc_npub(user_id)
-        if npub:
-            result["dpyc_npub"] = npub
+        if session.npub:
+            result["dpyc_npub"] = session.npub
         else:
-            result["dpyc_warning"] = "No DPYC identity active."
+            result["dpyc_warning"] = "No DPYC identity active — pass npub to credit tools."
         result["dpyc"] = _DPYC_BANNER
         return result
 
@@ -1303,7 +1262,7 @@ async def forget_credentials(sender_npub: str, service: str) -> dict[str, Any]:
 
 
 @tool
-async def purchase_credits(amount_sats: int) -> dict[str, Any]:
+async def purchase_credits(amount_sats: int, npub: str = "") -> dict[str, Any]:
     """Create a BTCPay Lightning invoice to purchase credits for tool calls.
 
     Call flow:
@@ -1317,7 +1276,7 @@ async def purchase_credits(amount_sats: int) -> dict[str, Any]:
     from tollbooth.tools import credits
 
     try:
-        user_id = await _ensure_dpyc_session()
+        user_id = _resolve_npub(npub)
         btcpay = _get_btcpay()
         cache = _get_ledger_cache()
     except ValueError as e:
@@ -1350,7 +1309,7 @@ async def purchase_credits(amount_sats: int) -> dict[str, Any]:
 
 
 @tool
-async def check_payment(invoice_id: str) -> dict[str, Any]:
+async def check_payment(invoice_id: str, npub: str = "") -> dict[str, Any]:
     """Verify that a Lightning invoice has settled and credit the payment to your balance.
 
     Safe to call multiple times -- credits are only granted once per invoice.
@@ -1361,7 +1320,7 @@ async def check_payment(invoice_id: str) -> dict[str, Any]:
     from tollbooth.tools import credits
 
     try:
-        user_id = await _ensure_dpyc_session()
+        user_id = _resolve_npub(npub)
         btcpay = _get_btcpay()
         cache = _get_ledger_cache()
     except ValueError as e:
@@ -1377,7 +1336,7 @@ async def check_payment(invoice_id: str) -> dict[str, Any]:
 
 
 @tool
-async def check_balance() -> dict[str, Any]:
+async def check_balance(npub: str = "") -> dict[str, Any]:
     """Check your current credit balance, tier info, and usage summary.
 
     Read-only -- no side effects. Call anytime to check funding level.
@@ -1385,7 +1344,7 @@ async def check_balance() -> dict[str, Any]:
     from tollbooth.tools import credits
 
     try:
-        user_id = await _ensure_dpyc_session()
+        user_id = _resolve_npub(npub)
         cache = _get_ledger_cache()
     except ValueError as e:
         return {"success": False, "error": str(e)}
@@ -1566,7 +1525,7 @@ async def check_oauth_status(patron_npub: str) -> dict[str, Any]:
 
 
 @tool
-async def get_positions() -> str | dict[str, Any]:
+async def get_positions(npub: str = "") -> str | dict[str, Any]:
     """Get current portfolio positions with options spread detection.
 
     Shows all open positions including equities and options.
@@ -1575,7 +1534,7 @@ async def get_positions() -> str | dict[str, Any]:
 
     Costs 5 api_sats.
     """
-    gate = await _debit_or_error("get_positions")
+    gate = await _debit_or_error("get_positions", npub=npub)
     if gate:
         return gate
 
@@ -1583,7 +1542,7 @@ async def get_positions() -> str | dict[str, Any]:
         user_id = _require_user_id()
         session = _require_session(user_id)
     except ValueError as e:
-        await _rollback_debit("get_positions")
+        await _rollback_debit("get_positions", npub=npub)
         return {"success": False, "error": str(e)}
 
     try:
@@ -1592,17 +1551,17 @@ async def get_positions() -> str | dict[str, Any]:
         result_text = await _get_positions(session.client, session.account_hash)
         return result_text
     except Exception:
-        await _rollback_debit("get_positions")
+        await _rollback_debit("get_positions", npub=npub)
         raise
 
 
 @tool
-async def get_balances() -> str | dict[str, Any]:
+async def get_balances(npub: str = "") -> str | dict[str, Any]:
     """Get account balances: cash, buying power, net liquidation value, and day P&L.
 
     Costs 5 api_sats.
     """
-    gate = await _debit_or_error("get_balances")
+    gate = await _debit_or_error("get_balances", npub=npub)
     if gate:
         return gate
 
@@ -1610,7 +1569,7 @@ async def get_balances() -> str | dict[str, Any]:
         user_id = _require_user_id()
         session = _require_session(user_id)
     except ValueError as e:
-        await _rollback_debit("get_balances")
+        await _rollback_debit("get_balances", npub=npub)
         return {"success": False, "error": str(e)}
 
     try:
@@ -1619,12 +1578,12 @@ async def get_balances() -> str | dict[str, Any]:
         result_text = await _get_account_balances(session.client, session.account_hash)
         return result_text
     except Exception:
-        await _rollback_debit("get_balances")
+        await _rollback_debit("get_balances", npub=npub)
         raise
 
 
 @tool
-async def get_quote(symbols: str) -> str | dict[str, Any]:
+async def get_quote(symbols: str, npub: str = "") -> str | dict[str, Any]:
     """Get real-time quotes for one or more symbols.
 
     Costs 5 api_sats.
@@ -1632,7 +1591,7 @@ async def get_quote(symbols: str) -> str | dict[str, Any]:
     Args:
         symbols: Comma-separated ticker symbols (e.g. "AAPL,MSFT,TSLA").
     """
-    gate = await _debit_or_error("get_quote")
+    gate = await _debit_or_error("get_quote", npub=npub)
     if gate:
         return gate
 
@@ -1640,7 +1599,7 @@ async def get_quote(symbols: str) -> str | dict[str, Any]:
         user_id = _require_user_id()
         session = _require_session(user_id)
     except ValueError as e:
-        await _rollback_debit("get_quote")
+        await _rollback_debit("get_quote", npub=npub)
         return {"success": False, "error": str(e)}
 
     try:
@@ -1649,7 +1608,7 @@ async def get_quote(symbols: str) -> str | dict[str, Any]:
         result_text = await _get_quote(session.client, symbols)
         return result_text
     except Exception:
-        await _rollback_debit("get_quote")
+        await _rollback_debit("get_quote", npub=npub)
         raise
 
 
@@ -1659,6 +1618,7 @@ async def get_option_chain(
     strike_count: int = 20,
     contract_type: str = "ALL",
     days_to_expiration: int = 21,
+    npub: str = "",
 ) -> str | dict[str, Any]:
     """Get filtered option chain for spread evaluation.
 
@@ -1673,7 +1633,7 @@ async def get_option_chain(
         contract_type: "ALL", "CALL", or "PUT".
         days_to_expiration: Maximum days to expiration to include.
     """
-    gate = await _debit_or_error("get_option_chain")
+    gate = await _debit_or_error("get_option_chain", npub=npub)
     if gate:
         return gate
 
@@ -1681,7 +1641,7 @@ async def get_option_chain(
         user_id = _require_user_id()
         session = _require_session(user_id)
     except ValueError as e:
-        await _rollback_debit("get_option_chain")
+        await _rollback_debit("get_option_chain", npub=npub)
         return {"success": False, "error": str(e)}
 
     try:
@@ -1692,7 +1652,7 @@ async def get_option_chain(
         )
         return result_text
     except Exception:
-        await _rollback_debit("get_option_chain")
+        await _rollback_debit("get_option_chain", npub=npub)
         raise
 
 
@@ -1703,6 +1663,7 @@ async def get_price_history(
     period: int = 1,
     frequency_type: str = "daily",
     frequency: int = 1,
+    npub: str = "",
 ) -> str | dict[str, Any]:
     """Get historical OHLCV price data for trend analysis.
 
@@ -1715,7 +1676,7 @@ async def get_price_history(
         frequency_type: "minute", "daily", "weekly", or "monthly".
         frequency: Frequency interval.
     """
-    gate = await _debit_or_error("get_price_history")
+    gate = await _debit_or_error("get_price_history", npub=npub)
     if gate:
         return gate
 
@@ -1723,7 +1684,7 @@ async def get_price_history(
         user_id = _require_user_id()
         session = _require_session(user_id)
     except ValueError as e:
-        await _rollback_debit("get_price_history")
+        await _rollback_debit("get_price_history", npub=npub)
         return {"success": False, "error": str(e)}
 
     try:
@@ -1734,7 +1695,7 @@ async def get_price_history(
         )
         return result_text
     except Exception:
-        await _rollback_debit("get_price_history")
+        await _rollback_debit("get_price_history", npub=npub)
         raise
 
 
@@ -1743,6 +1704,7 @@ async def get_movers(
     index: str = "$SPX",
     sort: str = "PERCENT_CHANGE_UP",
     frequency: int = 0,
+    npub: str = "",
 ) -> str | dict[str, Any]:
     """Get top movers for a market index.
 
@@ -1755,7 +1717,7 @@ async def get_movers(
         sort: "PERCENT_CHANGE_UP", "PERCENT_CHANGE_DOWN", or "VOLUME".
         frequency: 0 = all, 1 = 1-5%, 2 = 5-10%, 3 = 10-20%, 4 = 20%+.
     """
-    gate = await _debit_or_error("get_movers")
+    gate = await _debit_or_error("get_movers", npub=npub)
     if gate:
         return gate
 
@@ -1763,7 +1725,7 @@ async def get_movers(
         user_id = _require_user_id()
         session = _require_session(user_id)
     except ValueError as e:
-        await _rollback_debit("get_movers")
+        await _rollback_debit("get_movers", npub=npub)
         return {"success": False, "error": str(e)}
 
     try:
@@ -1772,7 +1734,7 @@ async def get_movers(
         result_text = await _get_movers(session.client, index, sort, frequency)
         return result_text
     except Exception:
-        await _rollback_debit("get_movers")
+        await _rollback_debit("get_movers", npub=npub)
         raise
 
 
@@ -1780,6 +1742,7 @@ async def get_movers(
 async def get_market_hours(
     markets: str = "equity,option",
     date: str = "",
+    npub: str = "",
 ) -> str | dict[str, Any]:
     """Get market hours for equity, option, bond, future, or forex markets.
 
@@ -1791,7 +1754,7 @@ async def get_market_hours(
         markets: Comma-separated: "equity", "option", "bond", "future", "forex".
         date: ISO date to check (e.g. "2026-03-15"). Defaults to today.
     """
-    gate = await _debit_or_error("get_market_hours")
+    gate = await _debit_or_error("get_market_hours", npub=npub)
     if gate:
         return gate
 
@@ -1799,7 +1762,7 @@ async def get_market_hours(
         user_id = _require_user_id()
         session = _require_session(user_id)
     except ValueError as e:
-        await _rollback_debit("get_market_hours")
+        await _rollback_debit("get_market_hours", npub=npub)
         return {"success": False, "error": str(e)}
 
     try:
@@ -1810,7 +1773,7 @@ async def get_market_hours(
         )
         return result_text
     except Exception:
-        await _rollback_debit("get_market_hours")
+        await _rollback_debit("get_market_hours", npub=npub)
         raise
 
 
@@ -1818,6 +1781,7 @@ async def get_market_hours(
 async def search_instruments(
     symbol: str,
     projection: str = "symbol-search",
+    npub: str = "",
 ) -> str | dict[str, Any]:
     """Search for instruments by symbol, name, or CUSIP.
 
@@ -1830,7 +1794,7 @@ async def search_instruments(
         projection: "symbol-search", "symbol-regex", "desc-search",
             "desc-regex", or "fundamental".
     """
-    gate = await _debit_or_error("search_instruments")
+    gate = await _debit_or_error("search_instruments", npub=npub)
     if gate:
         return gate
 
@@ -1838,7 +1802,7 @@ async def search_instruments(
         user_id = _require_user_id()
         session = _require_session(user_id)
     except ValueError as e:
-        await _rollback_debit("search_instruments")
+        await _rollback_debit("search_instruments", npub=npub)
         return {"success": False, "error": str(e)}
 
     try:
@@ -1849,7 +1813,7 @@ async def search_instruments(
         )
         return result_text
     except Exception:
-        await _rollback_debit("search_instruments")
+        await _rollback_debit("search_instruments", npub=npub)
         raise
 
 
@@ -1858,6 +1822,7 @@ async def get_orders(
     from_date: str = "",
     to_date: str = "",
     status_filter: str = "",
+    npub: str = "",
 ) -> str | dict[str, Any]:
     """Get order history for your account.
 
@@ -1871,7 +1836,7 @@ async def get_orders(
         to_date: End date (ISO 8601). Defaults to now.
         status_filter: Optional status filter (e.g. "FILLED", "CANCELED", "WORKING").
     """
-    gate = await _debit_or_error("get_orders")
+    gate = await _debit_or_error("get_orders", npub=npub)
     if gate:
         return gate
 
@@ -1879,7 +1844,7 @@ async def get_orders(
         user_id = _require_user_id()
         session = _require_session(user_id)
     except ValueError as e:
-        await _rollback_debit("get_orders")
+        await _rollback_debit("get_orders", npub=npub)
         return {"success": False, "error": str(e)}
 
     try:
@@ -1894,12 +1859,12 @@ async def get_orders(
         )
         return result_text
     except Exception:
-        await _rollback_debit("get_orders")
+        await _rollback_debit("get_orders", npub=npub)
         raise
 
 
 @tool
-async def get_order(order_id: str) -> str | dict[str, Any]:
+async def get_order(order_id: str, npub: str = "") -> str | dict[str, Any]:
     """Get details for a single order by ID.
 
     Returns full order details including all legs, fills, and status.
@@ -1909,7 +1874,7 @@ async def get_order(order_id: str) -> str | dict[str, Any]:
     Args:
         order_id: The Schwab order ID.
     """
-    gate = await _debit_or_error("get_order")
+    gate = await _debit_or_error("get_order", npub=npub)
     if gate:
         return gate
 
@@ -1917,7 +1882,7 @@ async def get_order(order_id: str) -> str | dict[str, Any]:
         user_id = _require_user_id()
         session = _require_session(user_id)
     except ValueError as e:
-        await _rollback_debit("get_order")
+        await _rollback_debit("get_order", npub=npub)
         return {"success": False, "error": str(e)}
 
     try:
@@ -1926,7 +1891,7 @@ async def get_order(order_id: str) -> str | dict[str, Any]:
         result_text = await _get_order(session.client, session.account_hash, order_id)
         return result_text
     except Exception:
-        await _rollback_debit("get_order")
+        await _rollback_debit("get_order", npub=npub)
         raise
 
 
@@ -1935,6 +1900,7 @@ async def get_transactions(
     from_date: str = "",
     to_date: str = "",
     transaction_types: str = "",
+    npub: str = "",
 ) -> str | dict[str, Any]:
     """Get transaction history for your account.
 
@@ -1948,7 +1914,7 @@ async def get_transactions(
         to_date: End date (ISO 8601). Defaults to now.
         transaction_types: Comma-separated types: TRADE, DIVIDEND, CASH_IN_OR_CASH_OUT, etc.
     """
-    gate = await _debit_or_error("get_transactions")
+    gate = await _debit_or_error("get_transactions", npub=npub)
     if gate:
         return gate
 
@@ -1956,7 +1922,7 @@ async def get_transactions(
         user_id = _require_user_id()
         session = _require_session(user_id)
     except ValueError as e:
-        await _rollback_debit("get_transactions")
+        await _rollback_debit("get_transactions", npub=npub)
         return {"success": False, "error": str(e)}
 
     try:
@@ -1971,12 +1937,12 @@ async def get_transactions(
         )
         return result_text
     except Exception:
-        await _rollback_debit("get_transactions")
+        await _rollback_debit("get_transactions", npub=npub)
         raise
 
 
 @tool
-async def get_transaction(transaction_id: str) -> str | dict[str, Any]:
+async def get_transaction(transaction_id: str, npub: str = "") -> str | dict[str, Any]:
     """Get details for a single transaction by ID.
 
     Costs 8 api_sats.
@@ -1984,7 +1950,7 @@ async def get_transaction(transaction_id: str) -> str | dict[str, Any]:
     Args:
         transaction_id: The Schwab transaction ID.
     """
-    gate = await _debit_or_error("get_transaction")
+    gate = await _debit_or_error("get_transaction", npub=npub)
     if gate:
         return gate
 
@@ -1992,7 +1958,7 @@ async def get_transaction(transaction_id: str) -> str | dict[str, Any]:
         user_id = _require_user_id()
         session = _require_session(user_id)
     except ValueError as e:
-        await _rollback_debit("get_transaction")
+        await _rollback_debit("get_transaction", npub=npub)
         return {"success": False, "error": str(e)}
 
     try:
@@ -2003,7 +1969,7 @@ async def get_transaction(transaction_id: str) -> str | dict[str, Any]:
         )
         return result_text
     except Exception:
-        await _rollback_debit("get_transaction")
+        await _rollback_debit("get_transaction", npub=npub)
         raise
 
 
@@ -2048,7 +2014,7 @@ async def set_pricing_model(model_json: str) -> dict[str, Any]:
     except (ValueError, TypeError):
         pass
 
-    err = await _debit_or_error("set_pricing_model", operator_proof=operator_proof)
+    err = await _debit_or_error("set_pricing_model", npub="", operator_proof=operator_proof)
     if err:
         return err
     try:
@@ -2082,7 +2048,7 @@ async def list_constraint_types() -> dict[str, Any]:
 
 
 @tool
-async def account_statement() -> dict[str, Any]:
+async def account_statement(npub: str = "") -> dict[str, Any]:
     """Get a structured account statement showing balance, deposits, and usage.
 
     Free — no credits required.
@@ -2090,7 +2056,7 @@ async def account_statement() -> dict[str, Any]:
     from tollbooth.tools import credits
 
     try:
-        user_id = await _ensure_dpyc_session()
+        user_id = _resolve_npub(npub)
         cache = _get_ledger_cache()
     except ValueError as e:
         return {"success": False, "error": str(e)}
@@ -2099,7 +2065,7 @@ async def account_statement() -> dict[str, Any]:
 
 
 @tool
-async def account_statement_infographic(days: int = 30) -> dict[str, Any]:
+async def account_statement_infographic(days: int = 30, npub: str = "") -> dict[str, Any]:
     """Generate a visual SVG infographic of your account statement.
 
     Returns the same data as account_statement, rendered as a dark-themed
@@ -2116,15 +2082,15 @@ async def account_statement_infographic(days: int = 30) -> dict[str, Any]:
         png_base64: Base64-encoded PNG (only when cairosvg is installed).
         generated_at: ISO timestamp of generation.
     """
-    gate = await _debit_or_error("account_statement_infographic")
+    gate = await _debit_or_error("account_statement_infographic", npub=npub)
     if gate:
         return gate
 
     try:
-        user_id = await _ensure_dpyc_session()
+        user_id = _resolve_npub(npub)
         cache = _get_ledger_cache()
     except ValueError as e:
-        await _rollback_debit("account_statement_infographic")
+        await _rollback_debit("account_statement_infographic", npub=npub)
         return {"success": False, "error": str(e)}
 
     try:
@@ -2134,7 +2100,7 @@ async def account_statement_infographic(days: int = 30) -> dict[str, Any]:
 
         data = await credits.account_statement_tool(cache, user_id, days=days)
         if not data.get("success"):
-            await _rollback_debit("account_statement_infographic")
+            await _rollback_debit("account_statement_infographic", npub=npub)
             return data
 
         svg = render_account_infographic(data)
@@ -2148,14 +2114,14 @@ async def account_statement_infographic(days: int = 30) -> dict[str, Any]:
         if png_b64:
             result["png_base64"] = png_b64
 
-        return await _with_warning(result)
+        return await _with_warning(result, npub=npub)
     except Exception:
-        await _rollback_debit("account_statement_infographic")
+        await _rollback_debit("account_statement_infographic", npub=npub)
         raise
 
 
 @tool
-async def restore_credits(invoice_id: str) -> dict[str, Any]:
+async def restore_credits(invoice_id: str, npub: str = "") -> dict[str, Any]:
     """Restore credits from a previously paid Lightning invoice.
 
     Use this if credits were lost due to a server error after payment.
@@ -2169,7 +2135,7 @@ async def restore_credits(invoice_id: str) -> dict[str, Any]:
     from tollbooth.tools import credits
 
     try:
-        user_id = await _ensure_dpyc_session()
+        user_id = _resolve_npub(npub)
         btcpay = _get_btcpay()
         cache = _get_ledger_cache()
     except ValueError as e:

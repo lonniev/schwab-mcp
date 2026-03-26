@@ -50,11 +50,6 @@ class UserSession:
 
 _sessions: dict[str, UserSession] = {}  # horizon_user_id -> session
 
-# Optimization cache only — npub is the sole DPYC identity.
-# Explicit npub (from tool call parameter) always wins over this cache.
-# OAuth / Horizon ID determines transport auth, not DPYC identity.
-_dpyc_sessions: dict[str, str] = {}  # horizon_user_id -> npub (cache)
-
 
 def _create_client(
     client_id: str,
@@ -82,8 +77,6 @@ def set_session(
         npub=npub,
     )
     _sessions[user_id] = session
-    if npub:
-        _dpyc_sessions[user_id] = npub
     return session
 
 
@@ -99,7 +92,6 @@ def get_session(user_id: str) -> UserSession | None:
 async def clear_session(user_id: str) -> None:
     """Remove a session and close its async client."""
     session = _sessions.pop(user_id, None)
-    _dpyc_sessions.pop(user_id, None)
     if session and session.client:
         try:
             await session.client.close()
@@ -107,6 +99,3 @@ async def clear_session(user_id: str) -> None:
             pass
 
 
-def get_dpyc_npub(user_id: str) -> str | None:
-    """Get the DPYC npub for a Horizon user, if activated."""
-    return _dpyc_sessions.get(user_id)
