@@ -49,7 +49,11 @@ class UserSession:
 
 
 _sessions: dict[str, UserSession] = {}  # horizon_user_id -> session
-_dpyc_sessions: dict[str, str] = {}  # horizon_user_id -> npub
+
+# Optimization cache only — npub is the sole DPYC identity.
+# Explicit npub (from tool call parameter) always wins over this cache.
+# OAuth / Horizon ID determines transport auth, not DPYC identity.
+_dpyc_sessions: dict[str, str] = {}  # horizon_user_id -> npub (cache)
 
 
 def _create_client(
