@@ -114,9 +114,7 @@ TOOL_COSTS: dict[str, int] = {
     "get_transaction": 8,
 }
 
-# Operator credentials (BTCPay) — delivered during onboarding
-OPERATOR_CREDENTIAL_SERVICE = "schwab-operator"
-# Patron credentials (Schwab OAuth) — delivered per-user
+# Patron credentials use OAuth2 browser dance, not Secure Courier
 PATRON_CREDENTIAL_SERVICE = "schwab"
 
 
@@ -145,10 +143,9 @@ def _get_settings():
 runtime = OperatorRuntime(
     service_name="Schwab MCP",
     tool_costs=TOOL_COSTS,
-    credential_service=OPERATOR_CREDENTIAL_SERVICE,
-    credential_template=CredentialTemplate(
-        service=OPERATOR_CREDENTIAL_SERVICE,
-        version=1,
+    operator_credential_template=CredentialTemplate(
+        service="schwab-operator",
+        version=2,
         fields={
             "btcpay_host": FieldSpec(
                 required=True, sensitive=True,
@@ -156,24 +153,37 @@ runtime = OperatorRuntime(
             ),
             "btcpay_api_key": FieldSpec(
                 required=True, sensitive=True,
-                description="Your BTCPay Server API key. Generate one in BTCPay under Account > Manage Account > API Keys.",
+                description=(
+                    "Your BTCPay Server API key. Generate one in BTCPay "
+                    "under Account > Manage Account > API Keys."
+                ),
             ),
             "btcpay_store_id": FieldSpec(
                 required=True, sensitive=True,
-                description="Your BTCPay Store ID. Find it in BTCPay under Stores > Settings > General.",
+                description=(
+                    "Your BTCPay Store ID. Find it in BTCPay "
+                    "under Stores > Settings > General."
+                ),
             ),
             "app_key": FieldSpec(
                 required=True, sensitive=True,
-                description="Your Schwab Trader API app key (client_id). From the Schwab Developer Portal.",
+                description=(
+                    "Your Schwab Trader API app key (client_id). "
+                    "From the Schwab Developer Portal."
+                ),
             ),
             "secret": FieldSpec(
                 required=True, sensitive=True,
-                description="Your Schwab Trader API secret (client_secret). From the Schwab Developer Portal.",
+                description=(
+                    "Your Schwab Trader API secret (client_secret). "
+                    "From the Schwab Developer Portal."
+                ),
             ),
         },
         description="Operator credentials for BTCPay Lightning payments and Schwab API access",
     ),
-    credential_greeting=(
+    # No patron_credential_template — Schwab uses OAuth2 browser dance
+    operator_credential_greeting=(
         "Hi — I'm Schwab MCP, a Tollbooth service for read-only Schwab "
         "brokerage data. To come online, I need your BTCPay Server "
         "credentials and Schwab API app credentials."
@@ -188,7 +198,6 @@ register_standard_tools(
     mcp,
     "schwab",
     runtime,
-    settings_fn=_get_settings,
     service_name="schwab-mcp",
     service_version="0.8.3",
 )
@@ -215,12 +224,7 @@ async def _ensure_operator_credentials() -> dict[str, str]:
 
     # Try loading from runtime credential vault
     try:
-        from tollbooth.tools.onboarding import load_config_from_vault
-        courier = await runtime.courier()
-        creds = await load_config_from_vault(
-            courier, OPERATOR_CREDENTIAL_SERVICE,
-            runtime.operator_npub(), ["app_key", "secret"],
-        )
+        creds = await runtime.load_credentials(["app_key", "secret"])
         if creds.get("app_key") and creds.get("secret"):
             _operator_credentials = {
                 "client_id": creds["app_key"],
