@@ -3,8 +3,6 @@
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 
 def _make_mock_client():
     """Create a mock SchwabClient."""
