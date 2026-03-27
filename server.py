@@ -136,14 +136,31 @@ def _get_settings():
 # ---------------------------------------------------------------------------
 
 runtime = OperatorRuntime(
+    service_name="Schwab MCP",
     tool_costs=TOOL_COSTS,
     credential_service=CREDENTIAL_SERVICE,
     credential_template=CredentialTemplate(
         service="schwab",
         version=1,
         fields={
-            "token_json": FieldSpec(required=True, sensitive=True),
-            "account_hash": FieldSpec(required=True, sensitive=True),
+            "token_json": FieldSpec(
+                required=True,
+                sensitive=True,
+                description=(
+                    "Your Schwab OAuth token JSON blob. Obtained automatically "
+                    "via the begin_oauth flow, or manually from Schwab's "
+                    "developer token endpoint."
+                ),
+            ),
+            "account_hash": FieldSpec(
+                required=True,
+                sensitive=True,
+                description=(
+                    "Your Schwab account hash (encrypted account identifier). "
+                    "Retrieved automatically during OAuth, or found in the "
+                    "Schwab Trader API account response."
+                ),
+            ),
         },
         description="Schwab OAuth token JSON and account hash",
     ),
