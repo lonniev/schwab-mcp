@@ -14,7 +14,7 @@ from typing import Any
 from fastmcp import FastMCP
 from tollbooth.constants import ToolTier
 from tollbooth.credential_templates import CredentialTemplate, FieldSpec
-from tollbooth.runtime import OperatorRuntime, register_standard_tools, resolve_npub
+from tollbooth.runtime import OperatorRuntime, register_standard_tools
 from tollbooth.slug_tools import make_slug_tool
 
 logger = logging.getLogger(__name__)
@@ -55,35 +55,6 @@ mcp = FastMCP(
     ),
 )
 tool = make_slug_tool(mcp, "schwab")
-
-_ONBOARDING_NEXT_STEPS = {
-    "action": "secure_courier_onboarding",
-    "operator_setup": (
-        "The operator must first deliver Schwab API app credentials via "
-        'Secure Courier (service="schwab-operator"): '
-        '{"app_key": "...", "secret": "..."}. '
-        "This is a one-time setup per deployment."
-    ),
-    "step_1": (
-        "Ask the user for their **patron npub** (the npub they registered "
-        "as a DPYC Citizen). They can get one from the dpyc-oracle's "
-        "how_to_join() tool."
-    ),
-    "step_2": (
-        "Call request_credential_channel(recipient_npub=<npub>) to send "
-        "a welcome DM to the user's Nostr client."
-    ),
-    "step_3": (
-        "Tell the user to open their Nostr client (Primal, Damus, etc.) "
-        "and reply to the welcome DM with their Schwab credentials in "
-        "the JSON format shown. Credentials must NEVER appear in this chat."
-    ),
-    "step_4": (
-        "Once the user confirms they replied, call "
-        "receive_credentials(sender_npub=<npub>) to vault the "
-        "credentials for future sessions."
-    ),
-}
 
 # ---------------------------------------------------------------------------
 # Tool cost table (domain tools only — standard tool costs are in the runtime)
@@ -180,7 +151,7 @@ register_standard_tools(
     runtime,
     settings_fn=_get_settings,
     service_name="schwab-mcp",
-    service_version="",
+    service_version="0.8.3",
 )
 
 
@@ -279,29 +250,6 @@ def _require_session(user_id: str):
             "Schwab token via Secure Courier."
         )
     return session
-
-
-# ---------------------------------------------------------------------------
-# Low-balance warning helper (uses runtime)
-# ---------------------------------------------------------------------------
-
-
-async def _with_warning(result: dict[str, Any], npub: str = "") -> dict[str, Any]:
-    """Attach a low-balance warning to a paid tool result if balance is low."""
-    try:
-        from tollbooth.tools.credits import compute_low_balance_warning
-
-        user_id = resolve_npub(npub)
-        cache = await runtime.ledger_cache()
-        ledger = await cache.get(user_id)
-        settings = _get_settings()
-        warning = compute_low_balance_warning(ledger, settings.seed_balance_sats)
-        if warning:
-            result = dict(result)
-            result["low_balance_warning"] = warning
-    except Exception:
-        pass
-    return result
 
 
 async def _seed_balance(npub: str) -> bool:
@@ -477,9 +425,12 @@ async def check_oauth_status(patron_npub: str) -> dict[str, Any]:
 
 @tool
 async def get_positions(npub: str = "") -> str | dict[str, Any]:
-    """Get current portfolio positions with options spread detection.
+    """Get positions for a Schwab account. Requires npub for credit billing.
 
     Costs 5 api_sats.
+
+    Args:
+        npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     err = await runtime.debit_or_error("get_positions", npub)
     if err:
@@ -503,9 +454,12 @@ async def get_positions(npub: str = "") -> str | dict[str, Any]:
 
 @tool
 async def get_balances(npub: str = "") -> str | dict[str, Any]:
-    """Get account balances: cash, buying power, net liquidation value, and day P&L.
+    """Get account balances for a Schwab account. Requires npub for credit billing.
 
     Costs 5 api_sats.
+
+    Args:
+        npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     err = await runtime.debit_or_error("get_balances", npub)
     if err:
@@ -529,12 +483,13 @@ async def get_balances(npub: str = "") -> str | dict[str, Any]:
 
 @tool
 async def get_quote(symbols: str, npub: str = "") -> str | dict[str, Any]:
-    """Get real-time quotes for one or more symbols.
+    """Get real-time quotes for one or more symbols. Requires npub for credit billing.
 
     Costs 5 api_sats.
 
     Args:
         symbols: Comma-separated ticker symbols (e.g. "AAPL,MSFT,TSLA").
+        npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     err = await runtime.debit_or_error("get_quote", npub)
     if err:
@@ -564,7 +519,7 @@ async def get_option_chain(
     days_to_expiration: int = 21,
     npub: str = "",
 ) -> str | dict[str, Any]:
-    """Get filtered option chain for spread evaluation.
+    """Get filtered option chain for spread evaluation. Requires npub for credit billing.
 
     Costs 10 api_sats.
 
@@ -573,6 +528,7 @@ async def get_option_chain(
         strike_count: Number of strikes around ATM to include.
         contract_type: "ALL", "CALL", or "PUT".
         days_to_expiration: Maximum days to expiration to include.
+        npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     err = await runtime.debit_or_error("get_option_chain", npub)
     if err:
@@ -605,7 +561,7 @@ async def get_price_history(
     frequency: int = 1,
     npub: str = "",
 ) -> str | dict[str, Any]:
-    """Get historical OHLCV price data for trend analysis.
+    """Get historical OHLCV price data for trend analysis. Requires npub for credit billing.
 
     Costs 10 api_sats.
 
@@ -615,6 +571,7 @@ async def get_price_history(
         period: Number of periods.
         frequency_type: "minute", "daily", "weekly", or "monthly".
         frequency: Frequency interval.
+        npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     err = await runtime.debit_or_error("get_price_history", npub)
     if err:
@@ -645,7 +602,7 @@ async def get_movers(
     frequency: int = 0,
     npub: str = "",
 ) -> str | dict[str, Any]:
-    """Get top movers for a market index.
+    """Get top movers for a market index. Requires npub for credit billing.
 
     Costs 5 api_sats.
 
@@ -653,6 +610,7 @@ async def get_movers(
         index: Index symbol -- "$DJI", "$COMPX", or "$SPX".
         sort: "PERCENT_CHANGE_UP", "PERCENT_CHANGE_DOWN", or "VOLUME".
         frequency: 0 = all, 1 = 1-5%, 2 = 5-10%, 3 = 10-20%, 4 = 20%+.
+        npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     err = await runtime.debit_or_error("get_movers", npub)
     if err:
@@ -680,13 +638,14 @@ async def get_market_hours(
     date: str = "",
     npub: str = "",
 ) -> str | dict[str, Any]:
-    """Get market hours for equity, option, bond, future, or forex markets.
+    """Get market hours for equity, option, bond, future, or forex markets. Requires npub for credit billing.
 
     Costs 5 api_sats.
 
     Args:
         markets: Comma-separated: "equity", "option", "bond", "future", "forex".
         date: ISO date to check (e.g. "2026-03-15"). Defaults to today.
+        npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     err = await runtime.debit_or_error("get_market_hours", npub)
     if err:
@@ -716,7 +675,7 @@ async def search_instruments(
     projection: str = "symbol-search",
     npub: str = "",
 ) -> str | dict[str, Any]:
-    """Search for instruments by symbol, name, or CUSIP.
+    """Search for instruments by symbol, name, or CUSIP. Requires npub for credit billing.
 
     Costs 5 api_sats.
 
@@ -724,6 +683,7 @@ async def search_instruments(
         symbol: Search term -- ticker, partial name, or CUSIP.
         projection: "symbol-search", "symbol-regex", "desc-search",
             "desc-regex", or "fundamental".
+        npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     err = await runtime.debit_or_error("search_instruments", npub)
     if err:
@@ -754,7 +714,7 @@ async def get_orders(
     status_filter: str = "",
     npub: str = "",
 ) -> str | dict[str, Any]:
-    """Get order history for your account.
+    """Get order history for your Schwab account. Requires npub for credit billing.
 
     Costs 15 api_sats.
 
@@ -762,6 +722,7 @@ async def get_orders(
         from_date: Start date (ISO 8601). Defaults to 30 days ago.
         to_date: End date (ISO 8601). Defaults to now.
         status_filter: Optional status filter (e.g. "FILLED", "CANCELED", "WORKING").
+        npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     err = await runtime.debit_or_error("get_orders", npub)
     if err:
@@ -791,12 +752,13 @@ async def get_orders(
 
 @tool
 async def get_order(order_id: str, npub: str = "") -> str | dict[str, Any]:
-    """Get details for a single order by ID.
+    """Get details for a single order by ID. Requires npub for credit billing.
 
     Costs 8 api_sats.
 
     Args:
         order_id: The Schwab order ID.
+        npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     err = await runtime.debit_or_error("get_order", npub)
     if err:
@@ -825,7 +787,7 @@ async def get_transactions(
     transaction_types: str = "",
     npub: str = "",
 ) -> str | dict[str, Any]:
-    """Get transaction history for your account.
+    """Get transaction history for your Schwab account. Requires npub for credit billing.
 
     Costs 15 api_sats.
 
@@ -833,6 +795,7 @@ async def get_transactions(
         from_date: Start date (ISO 8601). Defaults to 30 days ago.
         to_date: End date (ISO 8601). Defaults to now.
         transaction_types: Comma-separated types: TRADE, DIVIDEND, CASH_IN_OR_CASH_OUT, etc.
+        npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     err = await runtime.debit_or_error("get_transactions", npub)
     if err:
@@ -862,12 +825,13 @@ async def get_transactions(
 
 @tool
 async def get_transaction(transaction_id: str, npub: str = "") -> str | dict[str, Any]:
-    """Get details for a single transaction by ID.
+    """Get details for a single transaction by ID. Requires npub for credit billing.
 
     Costs 8 api_sats.
 
     Args:
         transaction_id: The Schwab transaction ID.
+        npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     err = await runtime.debit_or_error("get_transaction", npub)
     if err:

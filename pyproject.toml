@@ -21,7 +21,7 @@ dev = [
 ]
 
 [tool.setuptools]
-py-modules = ["server", "auth", "settings", "models", "vault", "schwab_client", "oauth_flow"]
+py-modules = ["server", "settings", "models", "vault", "schwab_client", "oauth_flow"]
 packages = ["tools", "tests"]
 
 [tool.ruff]

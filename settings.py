@@ -11,6 +11,8 @@ class Settings(BaseSettings):
 
     Operator env vars (required):
         TOLLBOOTH_NOSTR_OPERATOR_NSEC — Nostr signing key
+
+    Optional (bootstrapped automatically on Horizon):
         NEON_DATABASE_URL — Postgres for NeonVault
 
     Schwab API credentials (client_id / client_secret) are delivered
