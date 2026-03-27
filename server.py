@@ -147,6 +147,10 @@ runtime = OperatorRuntime(
         },
         description="Schwab OAuth token JSON and account hash",
     ),
+    credential_greeting=(
+        "Hi -- I\u2019m Schwab MCP, a Tollbooth service for read-only Schwab "
+        "brokerage data. You (or your AI agent) requested a credential channel."
+    ),
 )
 
 # ---------------------------------------------------------------------------
