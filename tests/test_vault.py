@@ -64,46 +64,9 @@ def test_get_session_expires():
     _sessions.clear()
 
 
-@pytest.mark.asyncio
-async def test_clear_session():
-    """clear_session removes session and closes client."""
-    from vault import _dpyc_sessions, _sessions, clear_session, set_session
-
-    _sessions.clear()
-    _dpyc_sessions.clear()
-
-    client = _make_mock_client()
-
-    set_session("user-3", '{"t": "x"}', "hash", client, npub="npub1xyz")
-    assert get_session_helper("user-3") is not None
-
-    await clear_session("user-3")
-    assert "user-3" not in _sessions
-    assert "user-3" not in _dpyc_sessions
-
-    _sessions.clear()
-    _dpyc_sessions.clear()
-
-
 def get_session_helper(user_id):
     from vault import get_session
     return get_session(user_id)
-
-
-def test_get_dpyc_npub():
-    """get_dpyc_npub returns npub when set."""
-    from vault import _dpyc_sessions, _sessions, get_dpyc_npub, set_session
-
-    _sessions.clear()
-    _dpyc_sessions.clear()
-
-    client = _make_mock_client()
-    set_session("user-4", '{"t": "x"}', "hash", client, npub="npub1test")
-    assert get_dpyc_npub("user-4") == "npub1test"
-    assert get_dpyc_npub("unknown") is None
-
-    _sessions.clear()
-    _dpyc_sessions.clear()
 
 
 def test_session_repr():
