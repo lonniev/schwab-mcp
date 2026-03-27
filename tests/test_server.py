@@ -127,7 +127,10 @@ class TestCheckOAuthViaCollector:
         """Returns pending when collector has no code yet."""
         mock_reg = _mock_registry()
         with (
-            patch("server._get_settings", return_value=MagicMock(dpyc_registry_cache_ttl_seconds=300)),
+            patch(
+                "server._get_settings",
+                return_value=MagicMock(dpyc_registry_cache_ttl_seconds=300),
+            ),
             patch("tollbooth.registry.DPYCRegistry", return_value=mock_reg),
             patch(
                 "oauth_flow.retrieve_code_from_collector",
@@ -217,7 +220,10 @@ class TestCheckOAuthViaCollector:
         )
 
         with (
-            patch("server._get_settings", return_value=MagicMock(dpyc_registry_cache_ttl_seconds=300)),
+            patch(
+                "server._get_settings",
+                return_value=MagicMock(dpyc_registry_cache_ttl_seconds=300),
+            ),
             patch("tollbooth.registry.DPYCRegistry", return_value=mock_reg),
         ):
             from server import _check_oauth_via_collector
@@ -233,7 +239,10 @@ class TestCheckOAuthViaCollector:
         mock_reg = _mock_registry()
 
         with (
-            patch("server._get_settings", return_value=MagicMock(dpyc_registry_cache_ttl_seconds=300)),
+            patch(
+                "server._get_settings",
+                return_value=MagicMock(dpyc_registry_cache_ttl_seconds=300),
+            ),
             patch("tollbooth.registry.DPYCRegistry", return_value=mock_reg),
             patch(
                 "server._ensure_operator_credentials",
