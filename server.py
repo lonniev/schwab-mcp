@@ -57,6 +57,39 @@ mcp = FastMCP(
 tool = make_slug_tool(mcp, "schwab")
 
 # ---------------------------------------------------------------------------
+# Onboarding guidance for AI agents (no pricing-studio needed)
+# ---------------------------------------------------------------------------
+
+_ONBOARDING_NEXT_STEPS = {
+    "action": "secure_courier_onboarding",
+    "operator_setup": (
+        "The operator must first deliver Schwab API app credentials via "
+        'Secure Courier (service="schwab-operator"): '
+        '{"app_key": "...", "secret": "..."}. '
+        "This is a one-time setup per deployment."
+    ),
+    "step_1": (
+        "Ask the user for their **patron npub** (the npub they registered "
+        "as a DPYC Citizen). They can get one from the dpyc-oracle's "
+        "how_to_join() tool."
+    ),
+    "step_2": (
+        "Call request_credential_channel(recipient_npub=<npub>) to send "
+        "a welcome DM to the user's Nostr client."
+    ),
+    "step_3": (
+        "Tell the user to open their Nostr client (Primal, Damus, etc.) "
+        "and reply to the welcome DM with their Schwab credentials in "
+        "the format shown. Credentials must NEVER appear in this chat."
+    ),
+    "step_4": (
+        "Once the user confirms they replied, call "
+        "receive_credentials(sender_npub=<npub>) to vault the "
+        "credentials for future sessions."
+    ),
+}
+
+# ---------------------------------------------------------------------------
 # Tool cost table (domain tools only — standard tool costs are in the runtime)
 # ---------------------------------------------------------------------------
 
