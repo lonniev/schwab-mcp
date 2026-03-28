@@ -21,23 +21,25 @@ def _make_mock_session():
 class TestRequireSession:
     """Tests for _require_session."""
 
-    def test_returns_session_when_present(self):
+    @pytest.mark.asyncio
+    async def test_returns_session_when_present(self):
         """_require_session returns the active session."""
         session = _make_mock_session()
         with patch("vault.get_session", return_value=session) as mock_get:
             from server import _require_session
 
-            result = _require_session("user-1")
+            result = await _require_session("user-1")
             assert result is session
             mock_get.assert_called_once_with("user-1")
 
-    def test_raises_when_no_session(self):
+    @pytest.mark.asyncio
+    async def test_raises_when_no_session(self):
         """_require_session raises ValueError when no session exists."""
         with patch("vault.get_session", return_value=None):
             from server import _require_session
 
             with pytest.raises(ValueError, match="No active Schwab session"):
-                _require_session("user-1")
+                await _require_session("user-1")
 
 
 class TestToolCosts:

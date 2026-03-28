@@ -294,18 +294,62 @@ async def _get_redirect_uri() -> str:
 # Session resolution helpers
 # ---------------------------------------------------------------------------
 
+# Horizon user_id → patron npub mapping (populated on OAuth success)
+_npub_for_user: dict[str, str] = {}
 
-def _require_session(user_id: str):
-    """Get per-user session or raise ValueError."""
+
+async def _restore_session_from_vault(
+    user_id: str, patron_npub: str,
+) -> "UserSession | None":
+    """Try to restore a patron session from the Neon vault."""
+    import json as _json
+    creds = await runtime.load_patron_session(patron_npub)
+    if not creds or "token_json" not in creds:
+        return None
+    try:
+        op_creds = await _ensure_operator_credentials()
+        settings = _get_settings()
+        from vault import _create_client, set_session
+        client = _create_client(
+            op_creds["client_id"],
+            op_creds["client_secret"],
+            creds["token_json"],
+            api_base=settings.schwab_trader_api,
+        )
+        session = set_session(
+            user_id,
+            creds["token_json"],
+            creds.get("account_hash", ""),
+            client,
+            npub=patron_npub,
+        )
+        _npub_for_user[user_id] = patron_npub
+        logger.info("Restored session for %s from vault.", patron_npub[:20])
+        return session
+    except Exception as exc:
+        logger.warning("Vault session restore failed: %s", exc)
+        return None
+
+
+async def _require_session(user_id: str, npub: str = ""):
+    """Get per-user session, restoring from vault on cold start."""
     from vault import get_session
 
     session = get_session(user_id)
-    if session is None:
-        raise ValueError(
-            "No active Schwab session. Use receive_credentials to deliver your "
-            "Schwab token via Secure Courier."
-        )
-    return session
+    if session is not None:
+        return session
+
+    # Try vault restoration (survives process restarts)
+    patron_npub = _npub_for_user.get(user_id) or npub
+    if patron_npub:
+        restored = await _restore_session_from_vault(user_id, patron_npub)
+        if restored is not None:
+            return restored
+
+    raise ValueError(
+        "No active Schwab session. Use begin_oauth or receive_credentials "
+        "to authenticate."
+    )
 
 
 async def _seed_balance(npub: str) -> bool:
@@ -396,6 +440,13 @@ async def _check_oauth_via_collector(user_id: str, patron_npub: str) -> dict[str
         api_base=settings.schwab_trader_api,
     )
     set_session(user_id, token_json, account_hash, client, npub=patron_npub)
+    _npub_for_user[user_id] = patron_npub
+
+    # Persist to vault for cross-restart restoration
+    await runtime.store_patron_session(patron_npub, {
+        "token_json": token_json,
+        "account_hash": account_hash,
+    })
 
     # Seed balance for new users
     await _seed_balance(patron_npub)
@@ -494,7 +545,7 @@ async def get_positions(npub: str = "") -> str | dict[str, Any]:
 
     try:
         user_id = _require_user_id()
-        session = _require_session(user_id)
+        session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_positions", npub)
         return {"success": False, "error": str(e)}
@@ -523,7 +574,7 @@ async def get_balances(npub: str = "") -> str | dict[str, Any]:
 
     try:
         user_id = _require_user_id()
-        session = _require_session(user_id)
+        session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_balances", npub)
         return {"success": False, "error": str(e)}
@@ -553,7 +604,7 @@ async def get_quote(symbols: str, npub: str = "") -> str | dict[str, Any]:
 
     try:
         user_id = _require_user_id()
-        session = _require_session(user_id)
+        session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_quote", npub)
         return {"success": False, "error": str(e)}
@@ -592,7 +643,7 @@ async def get_option_chain(
 
     try:
         user_id = _require_user_id()
-        session = _require_session(user_id)
+        session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_option_chain", npub)
         return {"success": False, "error": str(e)}
@@ -635,7 +686,7 @@ async def get_price_history(
 
     try:
         user_id = _require_user_id()
-        session = _require_session(user_id)
+        session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_price_history", npub)
         return {"success": False, "error": str(e)}
@@ -674,7 +725,7 @@ async def get_movers(
 
     try:
         user_id = _require_user_id()
-        session = _require_session(user_id)
+        session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_movers", npub)
         return {"success": False, "error": str(e)}
@@ -711,7 +762,7 @@ async def get_market_hours(
 
     try:
         user_id = _require_user_id()
-        session = _require_session(user_id)
+        session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_market_hours", npub)
         return {"success": False, "error": str(e)}
@@ -749,7 +800,7 @@ async def search_instruments(
 
     try:
         user_id = _require_user_id()
-        session = _require_session(user_id)
+        session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("search_instruments", npub)
         return {"success": False, "error": str(e)}
@@ -788,7 +839,7 @@ async def get_orders(
 
     try:
         user_id = _require_user_id()
-        session = _require_session(user_id)
+        session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_orders", npub)
         return {"success": False, "error": str(e)}
@@ -824,7 +875,7 @@ async def get_order(order_id: str, npub: str = "") -> str | dict[str, Any]:
 
     try:
         user_id = _require_user_id()
-        session = _require_session(user_id)
+        session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_order", npub)
         return {"success": False, "error": str(e)}
@@ -861,7 +912,7 @@ async def get_transactions(
 
     try:
         user_id = _require_user_id()
-        session = _require_session(user_id)
+        session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_transactions", npub)
         return {"success": False, "error": str(e)}
@@ -897,7 +948,7 @@ async def get_transaction(transaction_id: str, npub: str = "") -> str | dict[str
 
     try:
         user_id = _require_user_id()
-        session = _require_session(user_id)
+        session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_transaction", npub)
         return {"success": False, "error": str(e)}
