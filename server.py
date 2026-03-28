@@ -300,9 +300,8 @@ _npub_for_user: dict[str, str] = {}
 
 async def _restore_session_from_vault(
     user_id: str, patron_npub: str,
-) -> "UserSession | None":
+):
     """Try to restore a patron session from the Neon vault."""
-    import json as _json
     creds = await runtime.load_patron_session(patron_npub)
     if not creds or "token_json" not in creds:
         return None
