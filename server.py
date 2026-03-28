@@ -489,6 +489,21 @@ async def begin_oauth(patron_npub: str) -> dict[str, Any]:
     )
 
     # Shorten the authorize URL for human-friendliness (best-effort)
+    # Shorten the authorize URL for easier copy/paste
+    if "authorize_url" in result:
+        try:
+            import httpx
+
+            resp = await httpx.AsyncClient().post(
+                "https://is.gd/create.php",
+                params={"format": "simple", "url": result["authorize_url"]},
+                timeout=5,
+            )
+            if resp.status_code == 200 and resp.text.startswith("https://"):
+                result["authorize_url_short"] = resp.text.strip()
+        except Exception:
+            pass  # Full URL is always available
+
     return result
 
 
