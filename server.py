@@ -495,7 +495,7 @@ async def begin_oauth(patron_npub: str) -> dict[str, Any]:
             import httpx
 
             resp = await httpx.AsyncClient().post(
-                "https://is.gd/create.php",
+                "https://v.gd/create.php",
                 params={"format": "simple", "url": result["authorize_url"]},
                 timeout=5,
             )
