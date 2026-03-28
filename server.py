@@ -194,12 +194,20 @@ runtime = OperatorRuntime(
 # Register all standard DPYC tools from the wheel
 # ---------------------------------------------------------------------------
 
+def _get_version() -> str:
+    try:
+        import importlib.metadata
+        return importlib.metadata.version("schwab-mcp")
+    except Exception:
+        return "unknown"
+
+
 register_standard_tools(
     mcp,
     "schwab",
     runtime,
     service_name="schwab-mcp",
-    service_version="0.8.3",
+    service_version=_get_version(),
 )
 
 
