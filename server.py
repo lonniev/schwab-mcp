@@ -686,7 +686,9 @@ async def get_market_hours(
     date: str = "",
     npub: str = "",
 ) -> str | dict[str, Any]:
-    """Get market hours for equity, option, bond, future, or forex markets. Requires npub for credit billing.
+    """Get market hours for equity, option, bond, future, or forex markets.
+
+    Requires npub for credit billing.
 
     Costs 5 api_sats.
 
