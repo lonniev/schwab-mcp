@@ -302,7 +302,9 @@ async def _restore_session_from_vault(
     user_id: str, patron_npub: str,
 ):
     """Try to restore a patron session from the Neon vault."""
-    creds = await runtime.load_patron_session(patron_npub)
+    creds = await runtime.load_patron_session(
+        patron_npub, service=PATRON_CREDENTIAL_SERVICE,
+    )
     if not creds or "token_json" not in creds:
         return None
     try:
@@ -445,7 +447,7 @@ async def _check_oauth_via_collector(user_id: str, patron_npub: str) -> dict[str
     await runtime.store_patron_session(patron_npub, {
         "token_json": token_json,
         "account_hash": account_hash,
-    })
+    }, service=PATRON_CREDENTIAL_SERVICE)
 
     # Seed balance for new users
     await _seed_balance(patron_npub)
