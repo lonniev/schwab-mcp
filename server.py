@@ -9,7 +9,9 @@ domain-specific Schwab brokerage tools are defined here.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import Field
 
 from fastmcp import FastMCP
 from tollbooth.constants import ToolTier
@@ -255,26 +257,6 @@ async def _ensure_operator_credentials() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def _get_current_user_id() -> str | None:
-    """Extract FastMCP Cloud user ID from request headers."""
-    try:
-        from fastmcp.server.dependencies import get_http_headers
-
-        headers = get_http_headers(include_all=True)
-        return headers.get("fastmcp-cloud-user")
-    except Exception:
-        return None
-
-
-def _require_user_id() -> str:
-    """Extract user ID or raise ValueError."""
-    user_id = _get_current_user_id()
-    if not user_id:
-        raise ValueError(
-            "Multi-tenant credentials require FastMCP Cloud (Horizon). "
-            "In local dev mode, the server cannot resolve a user identity."
-        )
-    return user_id
 
 
 async def _get_redirect_uri() -> str:
@@ -489,19 +471,38 @@ async def begin_oauth(patron_npub: str) -> dict[str, Any]:
         redirect_uri=redirect_uri,
     )
 
-    # Shorten the authorize URL for human-friendliness (best-effort)
-    # Shorten the authorize URL for easier copy/paste
+    # Shorten the authorize URL via tollbooth-shortlinks (best-effort)
     if "authorize_url" in result:
         try:
             import httpx
 
             resp = await httpx.AsyncClient().post(
-                "https://v.gd/create.php",
-                params={"format": "simple", "url": result["authorize_url"]},
-                timeout=5,
+                "https://tollbooth-shortlinks.fastmcp.app/mcp/",
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "create_shortlink",
+                        "arguments": {"url": result["authorize_url"]},
+                    },
+                    "id": 1,
+                },
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                },
+                timeout=10,
             )
-            if resp.status_code == 200 and resp.text.startswith("https://"):
-                result["authorize_url_short"] = resp.text.strip()
+            if resp.status_code == 200:
+                import json
+
+                for line in resp.text.splitlines():
+                    if line.startswith("data: "):
+                        data = json.loads(line[6:])
+                        content = data.get("result", {}).get("structuredContent", {})
+                        if content.get("success") and content.get("short_url"):
+                            result["authorize_url_short"] = content["short_url"]
+                            break
         except Exception:
             pass  # Full URL is always available
 
@@ -519,7 +520,7 @@ async def check_oauth_status(patron_npub: str) -> dict[str, Any]:
         patron_npub: The same DPYC patron npub used in begin_oauth.
     """
     try:
-        user_id = _require_user_id()
+        user_id = OperatorRuntime.require_user_id()
     except ValueError as e:
         return {"success": False, "error": str(e)}
 
@@ -532,7 +533,7 @@ async def check_oauth_status(patron_npub: str) -> dict[str, Any]:
 
 
 @tool
-async def get_positions(npub: str = "") -> str | dict[str, Any]:
+async def get_positions(npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "") -> str | dict[str, Any]:
     """Get positions for a Schwab account. Requires npub for credit billing.
 
     Costs 5 api_sats.
@@ -545,7 +546,7 @@ async def get_positions(npub: str = "") -> str | dict[str, Any]:
         return err
 
     try:
-        user_id = _require_user_id()
+        user_id = OperatorRuntime.require_user_id()
         session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_positions", npub)
@@ -561,7 +562,7 @@ async def get_positions(npub: str = "") -> str | dict[str, Any]:
 
 
 @tool
-async def get_balances(npub: str = "") -> str | dict[str, Any]:
+async def get_balances(npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "") -> str | dict[str, Any]:
     """Get account balances for a Schwab account. Requires npub for credit billing.
 
     Costs 5 api_sats.
@@ -574,7 +575,7 @@ async def get_balances(npub: str = "") -> str | dict[str, Any]:
         return err
 
     try:
-        user_id = _require_user_id()
+        user_id = OperatorRuntime.require_user_id()
         session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_balances", npub)
@@ -590,7 +591,7 @@ async def get_balances(npub: str = "") -> str | dict[str, Any]:
 
 
 @tool
-async def get_quote(symbols: str, npub: str = "") -> str | dict[str, Any]:
+async def get_quote(symbols: str, npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "") -> str | dict[str, Any]:
     """Get real-time quotes for one or more symbols. Requires npub for credit billing.
 
     Costs 5 api_sats.
@@ -604,7 +605,7 @@ async def get_quote(symbols: str, npub: str = "") -> str | dict[str, Any]:
         return err
 
     try:
-        user_id = _require_user_id()
+        user_id = OperatorRuntime.require_user_id()
         session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_quote", npub)
@@ -625,7 +626,7 @@ async def get_option_chain(
     strike_count: int = 20,
     contract_type: str = "ALL",
     days_to_expiration: int = 21,
-    npub: str = "",
+    npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "",
 ) -> str | dict[str, Any]:
     """Get filtered option chain for spread evaluation. Requires npub for credit billing.
 
@@ -643,7 +644,7 @@ async def get_option_chain(
         return err
 
     try:
-        user_id = _require_user_id()
+        user_id = OperatorRuntime.require_user_id()
         session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_option_chain", npub)
@@ -667,7 +668,7 @@ async def get_price_history(
     period: int = 1,
     frequency_type: str = "daily",
     frequency: int = 1,
-    npub: str = "",
+    npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "",
 ) -> str | dict[str, Any]:
     """Get historical OHLCV price data for trend analysis. Requires npub for credit billing.
 
@@ -686,7 +687,7 @@ async def get_price_history(
         return err
 
     try:
-        user_id = _require_user_id()
+        user_id = OperatorRuntime.require_user_id()
         session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_price_history", npub)
@@ -708,7 +709,7 @@ async def get_movers(
     index: str = "$SPX",
     sort: str = "PERCENT_CHANGE_UP",
     frequency: int = 0,
-    npub: str = "",
+    npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "",
 ) -> str | dict[str, Any]:
     """Get top movers for a market index. Requires npub for credit billing.
 
@@ -725,7 +726,7 @@ async def get_movers(
         return err
 
     try:
-        user_id = _require_user_id()
+        user_id = OperatorRuntime.require_user_id()
         session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_movers", npub)
@@ -744,7 +745,7 @@ async def get_movers(
 async def get_market_hours(
     markets: str = "equity,option",
     date: str = "",
-    npub: str = "",
+    npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "",
 ) -> str | dict[str, Any]:
     """Get market hours for equity, option, bond, future, or forex markets.
 
@@ -762,7 +763,7 @@ async def get_market_hours(
         return err
 
     try:
-        user_id = _require_user_id()
+        user_id = OperatorRuntime.require_user_id()
         session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_market_hours", npub)
@@ -783,7 +784,7 @@ async def get_market_hours(
 async def search_instruments(
     symbol: str,
     projection: str = "symbol-search",
-    npub: str = "",
+    npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "",
 ) -> str | dict[str, Any]:
     """Search for instruments by symbol, name, or CUSIP. Requires npub for credit billing.
 
@@ -800,7 +801,7 @@ async def search_instruments(
         return err
 
     try:
-        user_id = _require_user_id()
+        user_id = OperatorRuntime.require_user_id()
         session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("search_instruments", npub)
@@ -822,7 +823,7 @@ async def get_orders(
     from_date: str = "",
     to_date: str = "",
     status_filter: str = "",
-    npub: str = "",
+    npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "",
 ) -> str | dict[str, Any]:
     """Get order history for your Schwab account. Requires npub for credit billing.
 
@@ -839,7 +840,7 @@ async def get_orders(
         return err
 
     try:
-        user_id = _require_user_id()
+        user_id = OperatorRuntime.require_user_id()
         session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_orders", npub)
@@ -861,7 +862,7 @@ async def get_orders(
 
 
 @tool
-async def get_order(order_id: str, npub: str = "") -> str | dict[str, Any]:
+async def get_order(order_id: str, npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "") -> str | dict[str, Any]:
     """Get details for a single order by ID. Requires npub for credit billing.
 
     Costs 8 api_sats.
@@ -875,7 +876,7 @@ async def get_order(order_id: str, npub: str = "") -> str | dict[str, Any]:
         return err
 
     try:
-        user_id = _require_user_id()
+        user_id = OperatorRuntime.require_user_id()
         session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_order", npub)
@@ -895,7 +896,7 @@ async def get_transactions(
     from_date: str = "",
     to_date: str = "",
     transaction_types: str = "",
-    npub: str = "",
+    npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "",
 ) -> str | dict[str, Any]:
     """Get transaction history for your Schwab account. Requires npub for credit billing.
 
@@ -912,7 +913,7 @@ async def get_transactions(
         return err
 
     try:
-        user_id = _require_user_id()
+        user_id = OperatorRuntime.require_user_id()
         session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_transactions", npub)
@@ -934,7 +935,7 @@ async def get_transactions(
 
 
 @tool
-async def get_transaction(transaction_id: str, npub: str = "") -> str | dict[str, Any]:
+async def get_transaction(transaction_id: str, npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "") -> str | dict[str, Any]:
     """Get details for a single transaction by ID. Requires npub for credit billing.
 
     Costs 8 api_sats.
@@ -948,7 +949,7 @@ async def get_transaction(transaction_id: str, npub: str = "") -> str | dict[str
         return err
 
     try:
-        user_id = _require_user_id()
+        user_id = OperatorRuntime.require_user_id()
         session = await _require_session(user_id, npub=npub)
     except ValueError as e:
         await runtime.rollback_debit("get_transaction", npub)
