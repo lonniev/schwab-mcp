@@ -533,6 +533,7 @@ async def check_oauth_status(patron_npub: str) -> dict[str, Any]:
 
 
 @tool
+@runtime.paid_tool("get_positions", catch_errors=True)
 async def get_positions(npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "") -> str | dict[str, Any]:
     """Get positions for a Schwab account. Requires npub for credit billing.
 
@@ -541,27 +542,15 @@ async def get_positions(npub: Annotated[str, Field(description="Required. Your N
     Args:
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    err = await runtime.debit_or_error("get_positions", npub)
-    if err:
-        return err
+    user_id = OperatorRuntime.require_user_id()
+    session = await _require_session(user_id, npub=npub)
+    from tools.account import get_positions as _get_positions
 
-    try:
-        user_id = OperatorRuntime.require_user_id()
-        session = await _require_session(user_id, npub=npub)
-    except ValueError as e:
-        await runtime.rollback_debit("get_positions", npub)
-        return {"success": False, "error": str(e)}
-
-    try:
-        from tools.account import get_positions as _get_positions
-
-        return await _get_positions(session.client, session.account_hash)
-    except Exception:
-        await runtime.rollback_debit("get_positions", npub)
-        raise
+    return await _get_positions(session.client, session.account_hash)
 
 
 @tool
+@runtime.paid_tool("get_balances", catch_errors=True)
 async def get_balances(npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "") -> str | dict[str, Any]:
     """Get account balances for a Schwab account. Requires npub for credit billing.
 
@@ -570,27 +559,15 @@ async def get_balances(npub: Annotated[str, Field(description="Required. Your No
     Args:
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    err = await runtime.debit_or_error("get_balances", npub)
-    if err:
-        return err
+    user_id = OperatorRuntime.require_user_id()
+    session = await _require_session(user_id, npub=npub)
+    from tools.account import get_account_balances as _get_account_balances
 
-    try:
-        user_id = OperatorRuntime.require_user_id()
-        session = await _require_session(user_id, npub=npub)
-    except ValueError as e:
-        await runtime.rollback_debit("get_balances", npub)
-        return {"success": False, "error": str(e)}
-
-    try:
-        from tools.account import get_account_balances as _get_account_balances
-
-        return await _get_account_balances(session.client, session.account_hash)
-    except Exception:
-        await runtime.rollback_debit("get_balances", npub)
-        raise
+    return await _get_account_balances(session.client, session.account_hash)
 
 
 @tool
+@runtime.paid_tool("get_quote", catch_errors=True)
 async def get_quote(symbols: str, npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "") -> str | dict[str, Any]:
     """Get real-time quotes for one or more symbols. Requires npub for credit billing.
 
@@ -600,27 +577,15 @@ async def get_quote(symbols: str, npub: Annotated[str, Field(description="Requir
         symbols: Comma-separated ticker symbols (e.g. "AAPL,MSFT,TSLA").
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    err = await runtime.debit_or_error("get_quote", npub)
-    if err:
-        return err
+    user_id = OperatorRuntime.require_user_id()
+    session = await _require_session(user_id, npub=npub)
+    from tools.market import get_quote as _get_quote
 
-    try:
-        user_id = OperatorRuntime.require_user_id()
-        session = await _require_session(user_id, npub=npub)
-    except ValueError as e:
-        await runtime.rollback_debit("get_quote", npub)
-        return {"success": False, "error": str(e)}
-
-    try:
-        from tools.market import get_quote as _get_quote
-
-        return await _get_quote(session.client, symbols)
-    except Exception:
-        await runtime.rollback_debit("get_quote", npub)
-        raise
+    return await _get_quote(session.client, symbols)
 
 
 @tool
+@runtime.paid_tool("get_option_chain", catch_errors=True)
 async def get_option_chain(
     symbol: str,
     strike_count: int = 20,
@@ -639,29 +604,17 @@ async def get_option_chain(
         days_to_expiration: Maximum days to expiration to include.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    err = await runtime.debit_or_error("get_option_chain", npub)
-    if err:
-        return err
+    user_id = OperatorRuntime.require_user_id()
+    session = await _require_session(user_id, npub=npub)
+    from tools.options import get_option_chain as _get_option_chain
 
-    try:
-        user_id = OperatorRuntime.require_user_id()
-        session = await _require_session(user_id, npub=npub)
-    except ValueError as e:
-        await runtime.rollback_debit("get_option_chain", npub)
-        return {"success": False, "error": str(e)}
-
-    try:
-        from tools.options import get_option_chain as _get_option_chain
-
-        return await _get_option_chain(
-            session.client, symbol, strike_count, contract_type, days_to_expiration,
-        )
-    except Exception:
-        await runtime.rollback_debit("get_option_chain", npub)
-        raise
+    return await _get_option_chain(
+        session.client, symbol, strike_count, contract_type, days_to_expiration,
+    )
 
 
 @tool
+@runtime.paid_tool("get_price_history", catch_errors=True)
 async def get_price_history(
     symbol: str,
     period_type: str = "month",
@@ -682,29 +635,17 @@ async def get_price_history(
         frequency: Frequency interval.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    err = await runtime.debit_or_error("get_price_history", npub)
-    if err:
-        return err
+    user_id = OperatorRuntime.require_user_id()
+    session = await _require_session(user_id, npub=npub)
+    from tools.market import get_price_history as _get_price_history
 
-    try:
-        user_id = OperatorRuntime.require_user_id()
-        session = await _require_session(user_id, npub=npub)
-    except ValueError as e:
-        await runtime.rollback_debit("get_price_history", npub)
-        return {"success": False, "error": str(e)}
-
-    try:
-        from tools.market import get_price_history as _get_price_history
-
-        return await _get_price_history(
-            session.client, symbol, period_type, period, frequency_type, frequency,
-        )
-    except Exception:
-        await runtime.rollback_debit("get_price_history", npub)
-        raise
+    return await _get_price_history(
+        session.client, symbol, period_type, period, frequency_type, frequency,
+    )
 
 
 @tool
+@runtime.paid_tool("get_movers", catch_errors=True)
 async def get_movers(
     index: str = "$SPX",
     sort: str = "PERCENT_CHANGE_UP",
@@ -721,27 +662,15 @@ async def get_movers(
         frequency: 0 = all, 1 = 1-5%, 2 = 5-10%, 3 = 10-20%, 4 = 20%+.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    err = await runtime.debit_or_error("get_movers", npub)
-    if err:
-        return err
+    user_id = OperatorRuntime.require_user_id()
+    session = await _require_session(user_id, npub=npub)
+    from tools.market import get_movers as _get_movers
 
-    try:
-        user_id = OperatorRuntime.require_user_id()
-        session = await _require_session(user_id, npub=npub)
-    except ValueError as e:
-        await runtime.rollback_debit("get_movers", npub)
-        return {"success": False, "error": str(e)}
-
-    try:
-        from tools.market import get_movers as _get_movers
-
-        return await _get_movers(session.client, index, sort, frequency)
-    except Exception:
-        await runtime.rollback_debit("get_movers", npub)
-        raise
+    return await _get_movers(session.client, index, sort, frequency)
 
 
 @tool
+@runtime.paid_tool("get_market_hours", catch_errors=True)
 async def get_market_hours(
     markets: str = "equity,option",
     date: str = "",
@@ -758,29 +687,17 @@ async def get_market_hours(
         date: ISO date to check (e.g. "2026-03-15"). Defaults to today.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    err = await runtime.debit_or_error("get_market_hours", npub)
-    if err:
-        return err
+    user_id = OperatorRuntime.require_user_id()
+    session = await _require_session(user_id, npub=npub)
+    from tools.market import get_market_hours as _get_market_hours
 
-    try:
-        user_id = OperatorRuntime.require_user_id()
-        session = await _require_session(user_id, npub=npub)
-    except ValueError as e:
-        await runtime.rollback_debit("get_market_hours", npub)
-        return {"success": False, "error": str(e)}
-
-    try:
-        from tools.market import get_market_hours as _get_market_hours
-
-        return await _get_market_hours(
-            session.client, markets, date=date or None,
-        )
-    except Exception:
-        await runtime.rollback_debit("get_market_hours", npub)
-        raise
+    return await _get_market_hours(
+        session.client, markets, date=date or None,
+    )
 
 
 @tool
+@runtime.paid_tool("search_instruments", catch_errors=True)
 async def search_instruments(
     symbol: str,
     projection: str = "symbol-search",
@@ -796,29 +713,17 @@ async def search_instruments(
             "desc-regex", or "fundamental".
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    err = await runtime.debit_or_error("search_instruments", npub)
-    if err:
-        return err
+    user_id = OperatorRuntime.require_user_id()
+    session = await _require_session(user_id, npub=npub)
+    from tools.market import search_instruments as _search_instruments
 
-    try:
-        user_id = OperatorRuntime.require_user_id()
-        session = await _require_session(user_id, npub=npub)
-    except ValueError as e:
-        await runtime.rollback_debit("search_instruments", npub)
-        return {"success": False, "error": str(e)}
-
-    try:
-        from tools.market import search_instruments as _search_instruments
-
-        return await _search_instruments(
-            session.client, symbol, projection=projection,
-        )
-    except Exception:
-        await runtime.rollback_debit("search_instruments", npub)
-        raise
+    return await _search_instruments(
+        session.client, symbol, projection=projection,
+    )
 
 
 @tool
+@runtime.paid_tool("get_orders", catch_errors=True)
 async def get_orders(
     from_date: str = "",
     to_date: str = "",
@@ -835,33 +740,21 @@ async def get_orders(
         status_filter: Optional status filter (e.g. "FILLED", "CANCELED", "WORKING").
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    err = await runtime.debit_or_error("get_orders", npub)
-    if err:
-        return err
+    user_id = OperatorRuntime.require_user_id()
+    session = await _require_session(user_id, npub=npub)
+    from tools.account import get_orders as _get_orders
 
-    try:
-        user_id = OperatorRuntime.require_user_id()
-        session = await _require_session(user_id, npub=npub)
-    except ValueError as e:
-        await runtime.rollback_debit("get_orders", npub)
-        return {"success": False, "error": str(e)}
-
-    try:
-        from tools.account import get_orders as _get_orders
-
-        return await _get_orders(
-            session.client,
-            session.account_hash,
-            from_date=from_date or None,
-            to_date=to_date or None,
-            status_filter=status_filter or None,
-        )
-    except Exception:
-        await runtime.rollback_debit("get_orders", npub)
-        raise
+    return await _get_orders(
+        session.client,
+        session.account_hash,
+        from_date=from_date or None,
+        to_date=to_date or None,
+        status_filter=status_filter or None,
+    )
 
 
 @tool
+@runtime.paid_tool("get_order", catch_errors=True)
 async def get_order(order_id: str, npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "") -> str | dict[str, Any]:
     """Get details for a single order by ID. Requires npub for credit billing.
 
@@ -871,27 +764,15 @@ async def get_order(order_id: str, npub: Annotated[str, Field(description="Requi
         order_id: The Schwab order ID.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    err = await runtime.debit_or_error("get_order", npub)
-    if err:
-        return err
+    user_id = OperatorRuntime.require_user_id()
+    session = await _require_session(user_id, npub=npub)
+    from tools.account import get_order as _get_order
 
-    try:
-        user_id = OperatorRuntime.require_user_id()
-        session = await _require_session(user_id, npub=npub)
-    except ValueError as e:
-        await runtime.rollback_debit("get_order", npub)
-        return {"success": False, "error": str(e)}
-
-    try:
-        from tools.account import get_order as _get_order
-
-        return await _get_order(session.client, session.account_hash, order_id)
-    except Exception:
-        await runtime.rollback_debit("get_order", npub)
-        raise
+    return await _get_order(session.client, session.account_hash, order_id)
 
 
 @tool
+@runtime.paid_tool("get_transactions", catch_errors=True)
 async def get_transactions(
     from_date: str = "",
     to_date: str = "",
@@ -908,33 +789,21 @@ async def get_transactions(
         transaction_types: Comma-separated types: TRADE, DIVIDEND, CASH_IN_OR_CASH_OUT, etc.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    err = await runtime.debit_or_error("get_transactions", npub)
-    if err:
-        return err
+    user_id = OperatorRuntime.require_user_id()
+    session = await _require_session(user_id, npub=npub)
+    from tools.account import get_transactions as _get_transactions
 
-    try:
-        user_id = OperatorRuntime.require_user_id()
-        session = await _require_session(user_id, npub=npub)
-    except ValueError as e:
-        await runtime.rollback_debit("get_transactions", npub)
-        return {"success": False, "error": str(e)}
-
-    try:
-        from tools.account import get_transactions as _get_transactions
-
-        return await _get_transactions(
-            session.client,
-            session.account_hash,
-            from_date=from_date or None,
-            to_date=to_date or None,
-            transaction_types=transaction_types or None,
-        )
-    except Exception:
-        await runtime.rollback_debit("get_transactions", npub)
-        raise
+    return await _get_transactions(
+        session.client,
+        session.account_hash,
+        from_date=from_date or None,
+        to_date=to_date or None,
+        transaction_types=transaction_types or None,
+    )
 
 
 @tool
+@runtime.paid_tool("get_transaction", catch_errors=True)
 async def get_transaction(transaction_id: str, npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "") -> str | dict[str, Any]:
     """Get details for a single transaction by ID. Requires npub for credit billing.
 
@@ -944,26 +813,13 @@ async def get_transaction(transaction_id: str, npub: Annotated[str, Field(descri
         transaction_id: The Schwab transaction ID.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    err = await runtime.debit_or_error("get_transaction", npub)
-    if err:
-        return err
+    user_id = OperatorRuntime.require_user_id()
+    session = await _require_session(user_id, npub=npub)
+    from tools.account import get_transaction as _get_transaction
 
-    try:
-        user_id = OperatorRuntime.require_user_id()
-        session = await _require_session(user_id, npub=npub)
-    except ValueError as e:
-        await runtime.rollback_debit("get_transaction", npub)
-        return {"success": False, "error": str(e)}
-
-    try:
-        from tools.account import get_transaction as _get_transaction
-
-        return await _get_transaction(
-            session.client, session.account_hash, transaction_id,
-        )
-    except Exception:
-        await runtime.rollback_debit("get_transaction", npub)
-        raise
+    return await _get_transaction(
+        session.client, session.account_hash, transaction_id,
+    )
 
 
 # ---------------------------------------------------------------------------

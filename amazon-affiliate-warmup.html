@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Good Brew - Amazon Affiliate Link Warmup</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; background: #fafaf8; color: #333; }
+  h1 { font-size: 1.4rem; border-bottom: 2px solid #e8a838; padding-bottom: 0.5rem; }
+  .controls { margin: 1rem 0; padding: 1rem; background: #fff; border: 1px solid #ddd; border-radius: 8px; }
+  .controls button { padding: 0.6rem 1.2rem; font-size: 0.95rem; cursor: pointer; border: none; border-radius: 6px; margin-right: 0.5rem; }
+  .btn-open { background: #e8a838; color: #fff; }
+  .btn-open:hover { background: #d4952e; }
+  .btn-stop { background: #c44; color: #fff; }
+  .progress { margin-top: 0.5rem; font-size: 0.9rem; color: #666; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1rem; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  th { background: #e8a838; color: #fff; text-align: left; padding: 0.6rem 0.8rem; font-size: 0.85rem; }
+  td { padding: 0.5rem 0.8rem; border-bottom: 1px solid #eee; font-size: 0.85rem; }
+  tr:hover { background: #fdf6e8; }
+  a { color: #1a6; text-decoration: none; }
+  a:visited { color: #888; }
+  a:hover { text-decoration: underline; }
+  .status { width: 24px; text-align: center; }
+  .visited { color: #4a4; }
+  .pending { color: #ccc; }
+</style>
+</head>
+<body>
+<h1>Good Brew - Amazon Affiliate Link Warmup</h1>
+<div class="controls">
+  <button class="btn-open" onclick="openAll()">Open All (3s intervals)</button>
+  <button class="btn-open" onclick="openAll(8000)">Open All (8s intervals)</button>
+  <button class="btn-stop" onclick="stopOpening()">Stop</button>
+  <div class="progress" id="progress">Click a button to start opening links, or click individual titles below.</div>
+</div>
+
+<table>
+<thead><tr><th class="status">#</th><th>Book</th><th>ASIN</th><th>Link</th></tr></thead>
+<tbody id="links"></tbody>
+</table>
+
+<script>
+const books = [
+  ["Applied Cryptography (20th Anniversary)", "1119096723"],
+  ["Atlas Shrugged", "0525948929"],
+  ["Basic Economics", "0465060730"],
+  ["Benedict Option", "0735213291"],
+  ["The Bitcoin Standard", "1119473861"],
+  ["Black Book of Communism", "0674076087"],
+  ["Choice: Cooperation, Enterprise, and Human Action", "1598132172"],
+  ["Church and the Market", "0739187996"],
+  ["Coffee The Magical Elixir", "1098384334"],
+  ["Complete Guide to Capital Markets", "0071468293"],
+  ["Crashmaker: A Federal Affaire", "0967175909"],
+  ["Creature from Jekyll Island", "0912986468"],
+  ["Crossing the Chasm (3rd Ed.)", "0062356852"],
+  ["Cryptonomicon", "0060512806"],
+  ["Economics in One Lesson", "B0CN2FDXXQ"],
+  ["Espresso Coffee: The Science of Quality", "0123703719"],
+  ["Fair Trade?", "188059532X"],
+  ["Fatal Conceit: The Errors of Socialism", "0226320669"],
+  ["Federalist Papers In Modern Language", "B00HTJM4AE"],
+  ["Good Energy", "0593712641"],
+  ["History of Money and Banking in the US", "0945466331"],
+  ["Human Action (Scholar's Edition)", "1933550317"],
+  ["JAVIER MILEI: Libertarian Ideas", "B0DQ1BYWJD"],
+  ["Land Was Everything", "0684845016"],
+  ["Lord of the Rings", "0063274736"],
+  ["Man, Economy, and State", "1933550279"],
+  ["Mastering the Lightning Network", "1492054860"],
+  ["MoneyGPT", "0593718631"],
+  ["Moon Is a Harsh Mistress", "B01E81E0WU"],
+  ["Napoleon of Notting Hill", "B0DT4PZNYV"],
+  ["Political Economy of Mercantilism", "0415828791"],
+  ["Probability Broach", "0765301539"],
+  ["Red Horse", "0898707471"],
+  ["Servile State", "177894275X"],
+  ["Slave Trade", "0684810638"],
+  ["Small Is Beautiful", "0061997765"],
+  ["Snow Crash", "059359973X"],
+  ["Sovereign Individual", "0684832720"],
+  ["Definitive Guide to Shopify Themes", "1484226402"],
+  ["The Network State", "B09VPKZR3G"],
+  ["The Phantom Tollbooth", "0394820371"],
+  ["Third Way: Foundations of Distributism", "1480178942"],
+  ["Treasury of Michael Saylor", "B0FQ6MVB9D"],
+  ["What Is Secular Humanism?", "B000I416HY"],
+  ["When Money Dies", "1586489941"],
+  ["World of Caffeine", "0415927234"]
+];
+
+const tag = "stablecoin-20";
+let timer = null;
+let current = 0;
+
+const tbody = document.getElementById("links");
+books.forEach(([title, asin], i) => {
+  const url = `https://amazon.com/dp/${asin}?tag=${tag}&linkCode=ogi&th=1&psc=1`;
+  const tr = document.createElement("tr");
+  tr.id = `row-${i}`;
+  tr.innerHTML = `
+    <td class="status"><span id="s-${i}" class="pending">&#9675;</span></td>
+    <td><a href="${url}" target="_blank" onclick="markVisited(${i})">${title}</a></td>
+    <td><code>${asin}</code></td>
+    <td><a href="${url}" target="_blank" onclick="markVisited(${i})">Amazon</a></td>`;
+  tbody.appendChild(tr);
+});
+
+function markVisited(i) {
+  document.getElementById(`s-${i}`).className = "visited";
+  document.getElementById(`s-${i}`).innerHTML = "&#9679;";
+}
+
+function updateProgress() {
+  document.getElementById("progress").textContent = `Opened ${current} of ${books.length} links.`;
+}
+
+function openAll(interval = 3000) {
+  stopOpening();
+  current = 0;
+  updateProgress();
+  timer = setInterval(() => {
+    if (current >= books.length) { stopOpening(); return; }
+    const [title, asin] = books[current];
+    const url = `https://amazon.com/dp/${asin}?tag=${tag}&linkCode=ogi&th=1&psc=1`;
+    window.open(url, "_blank");
+    markVisited(current);
+    current++;
+    updateProgress();
+  }, interval);
+}
+
+function stopOpening() {
+  if (timer) { clearInterval(timer); timer = null; }
+  document.getElementById("progress").textContent += " (Stopped)";
+}
+</script>
+</body>
+</html>
