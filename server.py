@@ -282,13 +282,22 @@ _npub_for_user: dict[str, str] = {}
 
 async def _restore_session_from_vault(
     user_id: str, patron_npub: str,
-):
-    """Try to restore a patron session from the Neon vault."""
-    creds = await runtime.load_patron_session(
-        patron_npub, service=PATRON_CREDENTIAL_SERVICE,
-    )
+) -> tuple[Any, str]:
+    """Try to restore a patron session from the Neon vault.
+
+    Returns (session, "") on success, or (None, reason) on failure.
+    The reason distinguishes "no credentials" from "restore error".
+    """
+    try:
+        creds = await runtime.load_patron_session(
+            patron_npub, service=PATRON_CREDENTIAL_SERVICE,
+        )
+    except Exception as exc:
+        return None, f"vault unavailable: {exc}"
+
     if not creds or "token_json" not in creds:
-        return None
+        return None, "no_credentials"
+
     try:
         op_creds = await _ensure_operator_credentials()
         settings = _get_settings()
@@ -308,10 +317,10 @@ async def _restore_session_from_vault(
         )
         _npub_for_user[user_id] = patron_npub
         logger.info("Restored session for %s from vault.", patron_npub[:20])
-        return session
+        return session, ""
     except Exception as exc:
         logger.warning("Vault session restore failed: %s", exc)
-        return None
+        return None, f"restore error: {exc}"
 
 
 async def _require_session(user_id: str, npub: str = ""):
@@ -325,9 +334,14 @@ async def _require_session(user_id: str, npub: str = ""):
     # Try vault restoration (survives process restarts)
     patron_npub = _npub_for_user.get(user_id) or npub
     if patron_npub:
-        restored = await _restore_session_from_vault(user_id, patron_npub)
+        restored, reason = await _restore_session_from_vault(user_id, patron_npub)
         if restored is not None:
             return restored
+        if reason and reason != "no_credentials":
+            raise ValueError(
+                f"Schwab session restore failed ({reason}). "
+                "The server may still be starting up — try again in a moment."
+            )
 
     raise ValueError(
         "No active Schwab session. Use begin_oauth or receive_credentials "
