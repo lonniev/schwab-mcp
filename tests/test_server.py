@@ -193,7 +193,6 @@ class TestCheckOAuthViaCollector:
             ),
             patch("vault._create_client", return_value=mock_client),
             patch("vault.set_session") as mock_set_session,
-            patch("server._seed_balance", new_callable=AsyncMock, return_value=False),
         ):
             from server import _check_oauth_via_collector
 

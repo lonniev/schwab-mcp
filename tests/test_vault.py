@@ -15,7 +15,7 @@ def test_set_and_get_session():
     """set_session stores a session retrievable by get_session."""
     from vault import _sessions, get_session, set_session
 
-    _sessions.clear()
+    _sessions.clear_all()
 
     client = _make_mock_client()
     session = set_session(
@@ -34,14 +34,14 @@ def test_set_and_get_session():
     retrieved = get_session("user-1")
     assert retrieved is session
 
-    _sessions.clear()
+    _sessions.clear_all()
 
 
 def test_get_session_returns_none_for_unknown():
     """get_session returns None for unknown user."""
     from vault import _sessions, get_session
 
-    _sessions.clear()
+    _sessions.clear_all()
     assert get_session("unknown-user") is None
 
 
@@ -49,17 +49,20 @@ def test_get_session_expires():
     """get_session returns None for expired sessions."""
     from vault import SESSION_TTL_SECONDS, _sessions, get_session, set_session
 
-    _sessions.clear()
+    _sessions.clear_all()
 
+    now = time.time()
     client = _make_mock_client()
-    session = set_session("user-2", '{"t": "x"}', "hash", client)
-    # Backdate creation
-    session.created_at = time.time() - SESSION_TTL_SECONDS - 1
 
-    assert get_session("user-2") is None
-    assert "user-2" not in _sessions
+    # Create session at "now", then ask for it at "now + TTL + 1"
+    with patch("time.time", return_value=now):
+        set_session("user-2", '{"t": "x"}', "hash", client)
 
-    _sessions.clear()
+    with patch("time.time", return_value=now + SESSION_TTL_SECONDS + 1):
+        assert get_session("user-2") is None
+        assert "user-2" not in _sessions
+
+    _sessions.clear_all()
 
 
 def get_session_helper(user_id):

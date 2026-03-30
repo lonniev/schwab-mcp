@@ -335,25 +335,6 @@ async def _require_session(user_id: str, npub: str = ""):
     )
 
 
-async def _seed_balance(npub: str) -> bool:
-    """Apply seed balance for a new user (idempotent via sentinel)."""
-    settings = _get_settings()
-    if settings.seed_balance_sats <= 0:
-        return False
-    try:
-        cache = await runtime.ledger_cache()
-        ledger = await cache.get(npub)
-        sentinel = "seed_balance_v1"
-        if sentinel not in ledger.credited_invoices:
-            ledger.credit_deposit(settings.seed_balance_sats, sentinel)
-            cache.mark_dirty(npub)
-            await cache.flush_user(npub)
-            return True
-    except Exception:
-        pass
-    return False
-
-
 # ---------------------------------------------------------------------------
 # OAuth collector helper
 # ---------------------------------------------------------------------------
@@ -430,9 +411,6 @@ async def _check_oauth_via_collector(user_id: str, patron_npub: str) -> dict[str
         "token_json": token_json,
         "account_hash": account_hash,
     }, service=PATRON_CREDENTIAL_SERVICE)
-
-    # Seed balance for new users
-    await _seed_balance(patron_npub)
 
     return {"status": "completed", "message": "Session activated successfully."}
 

@@ -32,7 +32,6 @@ class Settings(BaseSettings):
     schwab_trader_api: str = "https://api.schwabapi.com"
 
     # ── Credit economics (tuning with defaults) ──────────────────────
-    seed_balance_sats: int = 0
     credit_ttl_seconds: int | None = 604800  # 7 days
     dpyc_registry_cache_ttl_seconds: int = 300
 
