@@ -451,38 +451,11 @@ async def begin_oauth(patron_npub: str) -> dict[str, Any]:
 
     # Shorten the authorize URL via tollbooth-shortlinks (best-effort)
     if "authorize_url" in result:
-        try:
-            import httpx
+        from tollbooth.shortlinks import create_shortlink as _create_shortlink
 
-            resp = await httpx.AsyncClient().post(
-                "https://tollbooth-shortlinks.fastmcp.app/mcp/",
-                json={
-                    "jsonrpc": "2.0",
-                    "method": "tools/call",
-                    "params": {
-                        "name": "create_shortlink",
-                        "arguments": {"url": result["authorize_url"]},
-                    },
-                    "id": 1,
-                },
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "application/json, text/event-stream",
-                },
-                timeout=10,
-            )
-            if resp.status_code == 200:
-                import json
-
-                for line in resp.text.splitlines():
-                    if line.startswith("data: "):
-                        data = json.loads(line[6:])
-                        content = data.get("result", {}).get("structuredContent", {})
-                        if content.get("success") and content.get("short_url"):
-                            result["authorize_url_short"] = content["short_url"]
-                            break
-        except Exception:
-            pass  # Full URL is always available
+        short = await _create_shortlink(result["authorize_url"])
+        if short:
+            result["authorize_url_short"] = short
 
     return result
 
