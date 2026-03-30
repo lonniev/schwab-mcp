@@ -283,23 +283,31 @@ _npub_for_user: dict[str, str] = {}
 async def _restore_session_from_vault(
     user_id: str, patron_npub: str,
 ) -> tuple[Any, str]:
-    """Try to restore a patron session from the Neon vault.
+    """Attempt to restore a patron session from the encrypted vault.
 
-    Returns (session, "") on success, or (None, reason) on failure.
-    The reason distinguishes "no credentials" from "restore error".
+    Returns (session, "") on success, or (None, situation) describing
+    which lifecycle state the system is in. These are expected states,
+    not errors — each has a clear next action.
     """
+    # Stage 1: Can we reach the vault?
     try:
         creds = await runtime.load_patron_session(
             patron_npub, service=PATRON_CREDENTIAL_SERVICE,
         )
-    except Exception as exc:
-        return None, f"vault unavailable: {exc}"
+    except Exception:
+        return None, "vault_bootstrapping"
 
+    # Stage 2: Does this patron have stored credentials?
     if not creds or "token_json" not in creds:
         return None, "no_credentials"
 
+    # Stage 3: Can we build a live Schwab client from stored credentials?
     try:
         op_creds = await _ensure_operator_credentials()
+    except Exception:
+        return None, "operator_not_configured"
+
+    try:
         settings = _get_settings()
         from vault import _create_client, set_session
         client = _create_client(
@@ -318,9 +326,39 @@ async def _restore_session_from_vault(
         _npub_for_user[user_id] = patron_npub
         logger.info("Restored session for %s from vault.", patron_npub[:20])
         return session, ""
-    except Exception as exc:
-        logger.warning("Vault session restore failed: %s", exc)
-        return None, f"restore error: {exc}"
+    except Exception:
+        return None, "token_expired"
+
+
+# Patron-facing guidance for each lifecycle state.
+_SESSION_GUIDANCE: dict[str, str] = {
+    "vault_bootstrapping": (
+        "The server is establishing its encrypted connection to the "
+        "credential vault. This happens once after a cold start and "
+        "typically completes within 10-15 seconds. "
+        "Action: repeat your request shortly — no re-authentication needed."
+    ),
+    "operator_not_configured": (
+        "The operator's Schwab API application credentials have not been "
+        "delivered yet. This is an operator setup step, not a patron action. "
+        "The operator needs to complete Secure Courier onboarding with their "
+        "Schwab app_key and secret. "
+        "Action: contact the operator or try again later."
+    ),
+    "token_expired": (
+        "Your Schwab OAuth session was found in the vault but the access "
+        "token could not be used — Schwab limits tokens to 7 days. "
+        "Action: call begin_oauth to complete a new Schwab authorization. "
+        "This is a one-time browser sign-in that refreshes your access."
+    ),
+    "no_credentials": (
+        "No Schwab credentials are stored for your identity. This is "
+        "expected on first use. "
+        "Action: call begin_oauth to link your Schwab account through a "
+        "secure browser-based authorization. Your credentials will be "
+        "encrypted and stored so future sessions restore automatically."
+    ),
+}
 
 
 async def _require_session(user_id: str, npub: str = ""):
@@ -333,20 +371,14 @@ async def _require_session(user_id: str, npub: str = ""):
 
     # Try vault restoration (survives process restarts)
     patron_npub = _npub_for_user.get(user_id) or npub
+    situation = "no_credentials"
     if patron_npub:
-        restored, reason = await _restore_session_from_vault(user_id, patron_npub)
+        restored, situation = await _restore_session_from_vault(user_id, patron_npub)
         if restored is not None:
             return restored
-        if reason and reason != "no_credentials":
-            raise ValueError(
-                f"Schwab session restore failed ({reason}). "
-                "The server may still be starting up — try again in a moment."
-            )
 
-    raise ValueError(
-        "No active Schwab session. Use begin_oauth or receive_credentials "
-        "to authenticate."
-    )
+    guidance = _SESSION_GUIDANCE.get(situation, _SESSION_GUIDANCE["no_credentials"])
+    raise ValueError(guidance)
 
 
 # ---------------------------------------------------------------------------

@@ -38,7 +38,7 @@ class TestRequireSession:
         with patch("vault.get_session", return_value=None):
             from server import _require_session
 
-            with pytest.raises(ValueError, match="No active Schwab session"):
+            with pytest.raises(ValueError, match="No Schwab credentials are stored"):
                 await _require_session("user-1")
 
 
