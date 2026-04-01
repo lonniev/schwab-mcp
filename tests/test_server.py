@@ -107,17 +107,15 @@ class TestGetRedirectUri:
                 await _get_redirect_uri()
 
 
-def _mock_registry(collector_url="https://collector.example.com"):
-    """Return a mock DPYCRegistry whose resolve_service_by_name returns *collector_url*."""
-    mock_reg = AsyncMock()
-    mock_reg.resolve_service_by_name = AsyncMock(
+def _mock_resolve_service(collector_url="https://collector.example.com"):
+    """Return an AsyncMock for resolve_service_by_name returning *collector_url*."""
+    return AsyncMock(
         return_value={
             "npub": "npub1advocate",
             "url": collector_url,
             "name": "tollbooth-oauth2-collector",
         }
     )
-    return mock_reg
 
 
 class TestCheckOAuthViaCollector:
@@ -126,13 +124,12 @@ class TestCheckOAuthViaCollector:
     @pytest.mark.asyncio
     async def test_pending_when_code_not_ready(self):
         """Returns pending when collector has no code yet."""
-        mock_reg = _mock_registry()
         with (
             patch(
                 "server._get_settings",
                 return_value=MagicMock(dpyc_registry_cache_ttl_seconds=300),
             ),
-            patch("tollbooth.registry.DPYCRegistry", return_value=mock_reg),
+            patch("tollbooth.registry.resolve_service_by_name", _mock_resolve_service()),
             patch(
                 "oauth_flow.retrieve_code_from_collector",
                 new_callable=AsyncMock,
@@ -161,11 +158,10 @@ class TestCheckOAuthViaCollector:
         }
 
         mock_client = MagicMock()
-        mock_reg = _mock_registry()
 
         with (
             patch("server._get_settings", return_value=mock_settings),
-            patch("tollbooth.registry.DPYCRegistry", return_value=mock_reg),
+            patch("tollbooth.registry.resolve_service_by_name", _mock_resolve_service()),
             patch(
                 "server._ensure_operator_credentials",
                 new_callable=AsyncMock,
@@ -214,17 +210,16 @@ class TestCheckOAuthViaCollector:
         """Returns error when registry lookup for collector fails."""
         from tollbooth.registry import RegistryError
 
-        mock_reg = AsyncMock()
-        mock_reg.resolve_service_by_name = AsyncMock(
-            side_effect=RegistryError("No active member with service")
-        )
-
         with (
             patch(
                 "server._get_settings",
                 return_value=MagicMock(dpyc_registry_cache_ttl_seconds=300),
             ),
-            patch("tollbooth.registry.DPYCRegistry", return_value=mock_reg),
+            patch(
+                "tollbooth.registry.resolve_service_by_name",
+                new_callable=AsyncMock,
+                side_effect=RegistryError("No active member with service"),
+            ),
         ):
             from server import _check_oauth_via_collector
 
@@ -236,14 +231,12 @@ class TestCheckOAuthViaCollector:
     @pytest.mark.asyncio
     async def test_returns_failed_on_token_exchange_error(self):
         """Returns failed when token exchange raises an exception."""
-        mock_reg = _mock_registry()
-
         with (
             patch(
                 "server._get_settings",
                 return_value=MagicMock(dpyc_registry_cache_ttl_seconds=300),
             ),
-            patch("tollbooth.registry.DPYCRegistry", return_value=mock_reg),
+            patch("tollbooth.registry.resolve_service_by_name", _mock_resolve_service()),
             patch(
                 "server._ensure_operator_credentials",
                 new_callable=AsyncMock,

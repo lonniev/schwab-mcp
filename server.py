@@ -395,17 +395,13 @@ async def _check_oauth_via_collector(user_id: str, patron_npub: str) -> dict[str
     )
 
     try:
-        from tollbooth.registry import DEFAULT_REGISTRY_URL, DPYCRegistry
+        from tollbooth.registry import resolve_service_by_name
 
         settings = _get_settings()
-        registry = DPYCRegistry(
-            url=DEFAULT_REGISTRY_URL,
+        svc = await resolve_service_by_name(
+            "tollbooth-oauth2-collector",
             cache_ttl_seconds=settings.dpyc_registry_cache_ttl_seconds,
         )
-        try:
-            svc = await registry.resolve_service_by_name("tollbooth-oauth2-collector")
-        finally:
-            await registry.close()
         collector_url = svc["url"].rstrip("/")
     except Exception as e:
         return {"success": False, "error": f"Failed to resolve OAuth2 collector: {e}"}
