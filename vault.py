@@ -13,8 +13,9 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-from schwab_client import SchwabClient
 from tollbooth.session_cache import SessionCache
+
+from schwab_client import SchwabClient
 
 logger = logging.getLogger(__name__)
 

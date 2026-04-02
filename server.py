@@ -11,15 +11,23 @@ from __future__ import annotations
 import logging
 from typing import Annotated, Any
 
-from pydantic import Field
-
 from fastmcp import FastMCP
+from pydantic import Field
 from tollbooth.constants import ToolTier
 from tollbooth.credential_templates import CredentialTemplate, FieldSpec
 from tollbooth.runtime import OperatorRuntime, register_standard_tools
 from tollbooth.slug_tools import make_slug_tool
 
 logger = logging.getLogger(__name__)
+
+# Shared npub field annotation — avoids E501 on every tool signature
+NpubField = Annotated[
+    str,
+    Field(
+        description="Required. Your Nostr public key (npub1...) "
+        "for credit billing."
+    ),
+]
 
 mcp = FastMCP(
     "Schwab MCP",
@@ -527,7 +535,7 @@ async def check_oauth_status(patron_npub: str) -> dict[str, Any]:
 
 @tool
 @runtime.paid_tool("get_positions", catch_errors=True)
-async def get_positions(npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "") -> str | dict[str, Any]:
+async def get_positions(npub: NpubField = "") -> str | dict[str, Any]:
     """Get positions for a Schwab account. Requires npub for credit billing.
 
     Costs 5 api_sats.
@@ -544,7 +552,7 @@ async def get_positions(npub: Annotated[str, Field(description="Required. Your N
 
 @tool
 @runtime.paid_tool("get_balances", catch_errors=True)
-async def get_balances(npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "") -> str | dict[str, Any]:
+async def get_balances(npub: NpubField = "") -> str | dict[str, Any]:
     """Get account balances for a Schwab account. Requires npub for credit billing.
 
     Costs 5 api_sats.
@@ -561,7 +569,7 @@ async def get_balances(npub: Annotated[str, Field(description="Required. Your No
 
 @tool
 @runtime.paid_tool("get_quote", catch_errors=True)
-async def get_quote(symbols: str, npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "") -> str | dict[str, Any]:
+async def get_quote(symbols: str, npub: NpubField = "") -> str | dict[str, Any]:
     """Get real-time quotes for one or more symbols. Requires npub for credit billing.
 
     Costs 5 api_sats.
@@ -584,7 +592,7 @@ async def get_option_chain(
     strike_count: int = 20,
     contract_type: str = "ALL",
     days_to_expiration: int = 21,
-    npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "",
+    npub: NpubField = "",
 ) -> str | dict[str, Any]:
     """Get filtered option chain for spread evaluation. Requires npub for credit billing.
 
@@ -614,7 +622,7 @@ async def get_price_history(
     period: int = 1,
     frequency_type: str = "daily",
     frequency: int = 1,
-    npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "",
+    npub: NpubField = "",
 ) -> str | dict[str, Any]:
     """Get historical OHLCV price data for trend analysis. Requires npub for credit billing.
 
@@ -643,7 +651,7 @@ async def get_movers(
     index: str = "$SPX",
     sort: str = "PERCENT_CHANGE_UP",
     frequency: int = 0,
-    npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "",
+    npub: NpubField = "",
 ) -> str | dict[str, Any]:
     """Get top movers for a market index. Requires npub for credit billing.
 
@@ -667,7 +675,7 @@ async def get_movers(
 async def get_market_hours(
     markets: str = "equity,option",
     date: str = "",
-    npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "",
+    npub: NpubField = "",
 ) -> str | dict[str, Any]:
     """Get market hours for equity, option, bond, future, or forex markets.
 
@@ -694,7 +702,7 @@ async def get_market_hours(
 async def search_instruments(
     symbol: str,
     projection: str = "symbol-search",
-    npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "",
+    npub: NpubField = "",
 ) -> str | dict[str, Any]:
     """Search for instruments by symbol, name, or CUSIP. Requires npub for credit billing.
 
@@ -721,7 +729,7 @@ async def get_orders(
     from_date: str = "",
     to_date: str = "",
     status_filter: str = "",
-    npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "",
+    npub: NpubField = "",
 ) -> str | dict[str, Any]:
     """Get order history for your Schwab account. Requires npub for credit billing.
 
@@ -748,7 +756,7 @@ async def get_orders(
 
 @tool
 @runtime.paid_tool("get_order", catch_errors=True)
-async def get_order(order_id: str, npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "") -> str | dict[str, Any]:
+async def get_order(order_id: str, npub: NpubField = "") -> str | dict[str, Any]:
     """Get details for a single order by ID. Requires npub for credit billing.
 
     Costs 8 api_sats.
@@ -770,7 +778,7 @@ async def get_transactions(
     from_date: str = "",
     to_date: str = "",
     transaction_types: str = "",
-    npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "",
+    npub: NpubField = "",
 ) -> str | dict[str, Any]:
     """Get transaction history for your Schwab account. Requires npub for credit billing.
 
@@ -797,7 +805,7 @@ async def get_transactions(
 
 @tool
 @runtime.paid_tool("get_transaction", catch_errors=True)
-async def get_transaction(transaction_id: str, npub: Annotated[str, Field(description="Required. Your Nostr public key (npub1...) for credit billing.")] = "") -> str | dict[str, Any]:
+async def get_transaction(transaction_id: str, npub: NpubField = "") -> str | dict[str, Any]:
     """Get details for a single transaction by ID. Requires npub for credit billing.
 
     Costs 8 api_sats.
