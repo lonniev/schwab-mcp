@@ -13,9 +13,9 @@ from typing import Annotated, Any
 
 from fastmcp import FastMCP
 from pydantic import Field
-from tollbooth.constants import ToolTier
 from tollbooth.credential_templates import CredentialTemplate, FieldSpec
 from tollbooth.runtime import OperatorRuntime, register_standard_tools
+from tollbooth.tool_identity import STANDARD_IDENTITIES, ToolIdentity
 from tollbooth.slug_tools import make_slug_tool
 
 logger = logging.getLogger(__name__)
@@ -103,25 +103,81 @@ _ONBOARDING_NEXT_STEPS = {
 # Tool cost table (domain tools only — standard tool costs are in the runtime)
 # ---------------------------------------------------------------------------
 
-TOOL_COSTS: dict[str, int] = {
+TOOL_REGISTRY: dict[str, ToolIdentity] = {
     # Domain-specific free
-    "begin_oauth": ToolTier.FREE,
-    "check_oauth_status": ToolTier.FREE,
-    # Paid — WRITE tier (5 api_sats)
-    "get_positions": ToolTier.WRITE,
-    "get_balances": ToolTier.WRITE,
-    "get_quote": ToolTier.WRITE,
-    "get_movers": ToolTier.WRITE,
-    "get_market_hours": ToolTier.WRITE,
-    "search_instruments": ToolTier.WRITE,
-    # Paid — HEAVY tier (10 api_sats)
-    "get_option_chain": ToolTier.HEAVY,
-    "get_price_history": ToolTier.HEAVY,
-    # Paid — history endpoints (higher cost for multi-record scans)
-    "get_orders": 15,
-    "get_order": 8,
-    "get_transactions": 15,
-    "get_transaction": 8,
+    "begin_oauth": ToolIdentity(
+        capability="begin_oauth",
+        category="free",
+        intent="Start OAuth2 browser flow to connect a Schwab brokerage account.",
+    ),
+    "check_oauth_status": ToolIdentity(
+        capability="check_oauth_status",
+        category="free",
+        intent="Check whether the Schwab OAuth authorization flow has completed.",
+    ),
+    # Paid — write tier (brokerage reads)
+    "get_positions": ToolIdentity(
+        capability="get_brokerage_positions",
+        category="write",
+        intent="Get positions for a Schwab brokerage account.",
+    ),
+    "get_balances": ToolIdentity(
+        capability="get_brokerage_balances",
+        category="write",
+        intent="Get account balances for a Schwab brokerage account.",
+    ),
+    "get_quote": ToolIdentity(
+        capability="get_stock_quote",
+        category="write",
+        intent="Get real-time quotes for one or more ticker symbols.",
+    ),
+    "get_movers": ToolIdentity(
+        capability="get_market_movers",
+        category="write",
+        intent="Get top movers for a market index.",
+    ),
+    "get_market_hours": ToolIdentity(
+        capability="get_market_hours",
+        category="write",
+        intent="Get trading hours for equity, option, and other markets.",
+    ),
+    "search_instruments": ToolIdentity(
+        capability="search_instruments",
+        category="write",
+        intent="Search for instruments by symbol, name, or CUSIP.",
+    ),
+    # Paid — heavy tier (complex data retrieval)
+    "get_option_chain": ToolIdentity(
+        capability="get_option_chain",
+        category="heavy",
+        intent="Get filtered option chain for spread evaluation.",
+    ),
+    "get_price_history": ToolIdentity(
+        capability="get_price_history",
+        category="heavy",
+        intent="Get historical OHLCV price data for trend analysis.",
+    ),
+    # Paid — heavy tier (multi-record history scans)
+    "get_orders": ToolIdentity(
+        capability="get_brokerage_orders",
+        category="heavy",
+        intent="Get order history for a Schwab brokerage account.",
+    ),
+    "get_order": ToolIdentity(
+        capability="get_brokerage_order",
+        category="heavy",
+        intent="Get details for a single order by ID.",
+    ),
+    "get_transactions": ToolIdentity(
+        capability="get_brokerage_transactions",
+        category="heavy",
+        intent="Get transaction history for a Schwab brokerage account.",
+    ),
+    "get_transaction": ToolIdentity(
+        capability="get_brokerage_transaction",
+        category="heavy",
+        intent="Get details for a single transaction by ID.",
+    ),
 }
 
 # Patron credentials use OAuth2 browser dance, not Secure Courier
@@ -152,7 +208,7 @@ def _get_settings():
 
 runtime = OperatorRuntime(
     service_name="Schwab MCP",
-    tool_costs=TOOL_COSTS,
+    tool_registry={**STANDARD_IDENTITIES, **TOOL_REGISTRY},
     operator_credential_template=CredentialTemplate(
         service="schwab-operator",
         version=2,

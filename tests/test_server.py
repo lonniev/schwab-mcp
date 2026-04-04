@@ -42,33 +42,27 @@ class TestRequireSession:
                 await _require_session("user-1")
 
 
-class TestToolCosts:
-    """Tests for TOOL_COSTS table."""
+class TestToolRegistry:
+    """Tests for TOOL_REGISTRY categories."""
 
-    def test_free_tools_are_zero(self):
-        """Standard free tools are handled by register_standard_tools.
-        Domain-specific free tools checked here."""
-        from server import TOOL_COSTS
+    def test_free_tools_have_free_category(self):
+        from server import TOOL_REGISTRY
 
-        # Only check domain tools that remain in TOOL_COSTS
-        for name, cost in TOOL_COSTS.items():
-            if cost == 0:
-                pass  # free is valid
+        assert TOOL_REGISTRY["begin_oauth"].category == "free"
+        assert TOOL_REGISTRY["check_oauth_status"].category == "free"
 
-    def test_paid_tools_have_cost(self):
-        from server import TOOL_COSTS
+    def test_paid_tools_have_paid_category(self):
+        from server import TOOL_REGISTRY
 
-        assert TOOL_COSTS["get_positions"] > 0
-        assert TOOL_COSTS["get_balances"] > 0
-        assert TOOL_COSTS["get_quote"] > 0
-        assert TOOL_COSTS["get_option_chain"] > 0
-        assert TOOL_COSTS["get_price_history"] > 0
+        assert TOOL_REGISTRY["get_positions"].category in ("read", "write", "heavy")
+        assert TOOL_REGISTRY["get_balances"].category in ("read", "write", "heavy")
+        assert TOOL_REGISTRY["get_quote"].category in ("read", "write", "heavy")
 
-    def test_heavy_tools_cost_more(self):
-        from server import TOOL_COSTS
+    def test_heavy_tools_have_heavy_category(self):
+        from server import TOOL_REGISTRY
 
-        assert TOOL_COSTS["get_option_chain"] > TOOL_COSTS["get_positions"]
-        assert TOOL_COSTS["get_price_history"] > TOOL_COSTS["get_quote"]
+        assert TOOL_REGISTRY["get_option_chain"].category == "heavy"
+        assert TOOL_REGISTRY["get_price_history"].category == "heavy"
 
 
 class TestGetRedirectUri:
