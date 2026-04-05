@@ -55,13 +55,12 @@ mcp = FastMCP(
         '   - Reply with JSON: `{"token_json": "...", "account_hash": "..."}`\n'
         "   - Call `receive_credentials(sender_npub=<patron_npub>)` to vault your credentials\n\n"
         "## Credits Model\n\n"
-        "Tool calls cost api_sats per call. Auth and balance tools are always free. "
-        "Use `check_balance` to see your balance. Top up via `purchase_credits`.\n\n"
+        "Tool calls are priced dynamically via the operator's pricing model. "
+        "Use `check_balance` to see your balance and `check_price` to preview "
+        "tool costs. Top up via `purchase_credits`.\n\n"
         "## History Endpoints\n\n"
         "Order and transaction history are available via `get_orders`, `get_order`, "
-        "`get_transactions`, and `get_transaction`. These cost 15 api_sats (list) "
-        "or 8 api_sats (single) due to heavier data retrieval. "
-        "Default lookback is 30 days."
+        "`get_transactions`, and `get_transaction`. Default lookback is 30 days."
     ),
 )
 tool = make_slug_tool(mcp, "schwab")
@@ -100,7 +99,7 @@ _ONBOARDING_NEXT_STEPS = {
 }
 
 # ---------------------------------------------------------------------------
-# Tool cost table (domain tools only — standard tool costs are in the runtime)
+# Tool registry (domain tools only — standard tools are in the wheel)
 # ---------------------------------------------------------------------------
 
 TOOL_REGISTRY: dict[str, ToolIdentity] = {
@@ -592,10 +591,7 @@ async def check_oauth_status(patron_npub: str) -> dict[str, Any]:
 @tool
 @runtime.paid_tool("get_positions", catch_errors=True)
 async def get_positions(npub: NpubField = "") -> str | dict[str, Any]:
-    """Get positions for a Schwab account. Requires npub for credit billing.
-
-    Costs 5 api_sats.
-
+    """Get positions for a Schwab account.
     Args:
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
@@ -609,10 +605,7 @@ async def get_positions(npub: NpubField = "") -> str | dict[str, Any]:
 @tool
 @runtime.paid_tool("get_balances", catch_errors=True)
 async def get_balances(npub: NpubField = "") -> str | dict[str, Any]:
-    """Get account balances for a Schwab account. Requires npub for credit billing.
-
-    Costs 5 api_sats.
-
+    """Get account balances for a Schwab account.
     Args:
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
@@ -626,10 +619,7 @@ async def get_balances(npub: NpubField = "") -> str | dict[str, Any]:
 @tool
 @runtime.paid_tool("get_quote", catch_errors=True)
 async def get_quote(symbols: str, npub: NpubField = "") -> str | dict[str, Any]:
-    """Get real-time quotes for one or more symbols. Requires npub for credit billing.
-
-    Costs 5 api_sats.
-
+    """Get real-time quotes for one or more symbols.
     Args:
         symbols: Comma-separated ticker symbols (e.g. "AAPL,MSFT,TSLA").
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
@@ -650,10 +640,7 @@ async def get_option_chain(
     days_to_expiration: int = 21,
     npub: NpubField = "",
 ) -> str | dict[str, Any]:
-    """Get filtered option chain for spread evaluation. Requires npub for credit billing.
-
-    Costs 10 api_sats.
-
+    """Get filtered option chain for spread evaluation.
     Args:
         symbol: Underlying ticker symbol.
         strike_count: Number of strikes around ATM to include.
@@ -680,10 +667,7 @@ async def get_price_history(
     frequency: int = 1,
     npub: NpubField = "",
 ) -> str | dict[str, Any]:
-    """Get historical OHLCV price data for trend analysis. Requires npub for credit billing.
-
-    Costs 10 api_sats.
-
+    """Get historical OHLCV price data for trend analysis.
     Args:
         symbol: Ticker symbol.
         period_type: "day", "month", "year", or "ytd".
@@ -709,10 +693,7 @@ async def get_movers(
     frequency: int = 0,
     npub: NpubField = "",
 ) -> str | dict[str, Any]:
-    """Get top movers for a market index. Requires npub for credit billing.
-
-    Costs 5 api_sats.
-
+    """Get top movers for a market index.
     Args:
         index: Index symbol -- "$DJI", "$COMPX", or "$SPX".
         sort: "PERCENT_CHANGE_UP", "PERCENT_CHANGE_DOWN", or "VOLUME".
@@ -735,10 +716,7 @@ async def get_market_hours(
 ) -> str | dict[str, Any]:
     """Get market hours for equity, option, bond, future, or forex markets.
 
-    Requires npub for credit billing.
-
-    Costs 5 api_sats.
-
+   
     Args:
         markets: Comma-separated: "equity", "option", "bond", "future", "forex".
         date: ISO date to check (e.g. "2026-03-15"). Defaults to today.
@@ -760,10 +738,7 @@ async def search_instruments(
     projection: str = "symbol-search",
     npub: NpubField = "",
 ) -> str | dict[str, Any]:
-    """Search for instruments by symbol, name, or CUSIP. Requires npub for credit billing.
-
-    Costs 5 api_sats.
-
+    """Search for instruments by symbol, name, or CUSIP.
     Args:
         symbol: Search term -- ticker, partial name, or CUSIP.
         projection: "symbol-search", "symbol-regex", "desc-search",
@@ -787,10 +762,7 @@ async def get_orders(
     status_filter: str = "",
     npub: NpubField = "",
 ) -> str | dict[str, Any]:
-    """Get order history for your Schwab account. Requires npub for credit billing.
-
-    Costs 15 api_sats.
-
+    """Get order history for your Schwab account.
     Args:
         from_date: Start date (ISO 8601). Defaults to 30 days ago.
         to_date: End date (ISO 8601). Defaults to now.
@@ -813,10 +785,7 @@ async def get_orders(
 @tool
 @runtime.paid_tool("get_order", catch_errors=True)
 async def get_order(order_id: str, npub: NpubField = "") -> str | dict[str, Any]:
-    """Get details for a single order by ID. Requires npub for credit billing.
-
-    Costs 8 api_sats.
-
+    """Get details for a single order by ID.
     Args:
         order_id: The Schwab order ID.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
@@ -836,10 +805,7 @@ async def get_transactions(
     transaction_types: str = "",
     npub: NpubField = "",
 ) -> str | dict[str, Any]:
-    """Get transaction history for your Schwab account. Requires npub for credit billing.
-
-    Costs 15 api_sats.
-
+    """Get transaction history for your Schwab account.
     Args:
         from_date: Start date (ISO 8601). Defaults to 30 days ago.
         to_date: End date (ISO 8601). Defaults to now.
@@ -862,10 +828,7 @@ async def get_transactions(
 @tool
 @runtime.paid_tool("get_transaction", catch_errors=True)
 async def get_transaction(transaction_id: str, npub: NpubField = "") -> str | dict[str, Any]:
-    """Get details for a single transaction by ID. Requires npub for credit billing.
-
-    Costs 8 api_sats.
-
+    """Get details for a single transaction by ID.
     Args:
         transaction_id: The Schwab transaction ID.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
