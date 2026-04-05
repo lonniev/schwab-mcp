@@ -716,7 +716,6 @@ async def get_market_hours(
 ) -> str | dict[str, Any]:
     """Get market hours for equity, option, bond, future, or forex markets.
 
-   
     Args:
         markets: Comma-separated: "equity", "option", "bond", "future", "forex".
         date: ISO date to check (e.g. "2026-03-15"). Defaults to today.
