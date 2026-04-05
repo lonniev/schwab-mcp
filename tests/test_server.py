@@ -58,10 +58,11 @@ class TestToolRegistry:
 
     def test_paid_tools_have_paid_category(self):
         from server import TOOL_REGISTRY
+        paid = ("read", "write", "heavy")
 
-        assert self._by_capability(TOOL_REGISTRY, "get_brokerage_positions").category in ("read", "write", "heavy")
-        assert self._by_capability(TOOL_REGISTRY, "get_brokerage_balances").category in ("read", "write", "heavy")
-        assert self._by_capability(TOOL_REGISTRY, "get_stock_quote").category in ("read", "write", "heavy")
+        assert self._by_capability(TOOL_REGISTRY, "get_brokerage_positions").category in paid
+        assert self._by_capability(TOOL_REGISTRY, "get_brokerage_balances").category in paid
+        assert self._by_capability(TOOL_REGISTRY, "get_stock_quote").category in paid
 
     def test_heavy_tools_have_heavy_category(self):
         from server import TOOL_REGISTRY
