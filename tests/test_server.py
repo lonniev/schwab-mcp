@@ -43,26 +43,31 @@ class TestRequireSession:
 
 
 class TestToolRegistry:
-    """Tests for TOOL_REGISTRY categories."""
+    """Tests for TOOL_REGISTRY categories (keyed by UUID)."""
+
+    @staticmethod
+    def _by_capability(registry, cap):
+        """Look up identity by capability name."""
+        return next(ti for ti in registry.values() if ti.capability == cap)
 
     def test_free_tools_have_free_category(self):
         from server import TOOL_REGISTRY
 
-        assert TOOL_REGISTRY["begin_oauth"].category == "free"
-        assert TOOL_REGISTRY["check_oauth_status"].category == "free"
+        assert self._by_capability(TOOL_REGISTRY, "begin_oauth").category == "free"
+        assert self._by_capability(TOOL_REGISTRY, "check_oauth_status").category == "free"
 
     def test_paid_tools_have_paid_category(self):
         from server import TOOL_REGISTRY
 
-        assert TOOL_REGISTRY["get_positions"].category in ("read", "write", "heavy")
-        assert TOOL_REGISTRY["get_balances"].category in ("read", "write", "heavy")
-        assert TOOL_REGISTRY["get_quote"].category in ("read", "write", "heavy")
+        assert self._by_capability(TOOL_REGISTRY, "get_brokerage_positions").category in ("read", "write", "heavy")
+        assert self._by_capability(TOOL_REGISTRY, "get_brokerage_balances").category in ("read", "write", "heavy")
+        assert self._by_capability(TOOL_REGISTRY, "get_stock_quote").category in ("read", "write", "heavy")
 
     def test_heavy_tools_have_heavy_category(self):
         from server import TOOL_REGISTRY
 
-        assert TOOL_REGISTRY["get_option_chain"].category == "heavy"
-        assert TOOL_REGISTRY["get_price_history"].category == "heavy"
+        assert self._by_capability(TOOL_REGISTRY, "get_option_chain").category == "heavy"
+        assert self._by_capability(TOOL_REGISTRY, "get_price_history").category == "heavy"
 
 
 class TestGetRedirectUri:
