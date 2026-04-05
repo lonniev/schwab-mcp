@@ -16,7 +16,7 @@ from pydantic import Field
 from tollbooth.credential_templates import CredentialTemplate, FieldSpec
 from tollbooth.runtime import OperatorRuntime, register_standard_tools
 from tollbooth.slug_tools import make_slug_tool
-from tollbooth.tool_identity import STANDARD_IDENTITIES, ToolIdentity
+from tollbooth.tool_identity import STANDARD_IDENTITIES, ToolIdentity, capability_uuid
 
 logger = logging.getLogger(__name__)
 
@@ -102,82 +102,84 @@ _ONBOARDING_NEXT_STEPS = {
 # Tool registry (domain tools only — standard tools are in the wheel)
 # ---------------------------------------------------------------------------
 
-TOOL_REGISTRY: dict[str, ToolIdentity] = {
+_DOMAIN_TOOLS = [
     # Domain-specific free
-    "begin_oauth": ToolIdentity(
+    ToolIdentity(
         capability="begin_oauth",
         category="free",
         intent="Start OAuth2 browser flow to connect a Schwab brokerage account.",
     ),
-    "check_oauth_status": ToolIdentity(
+    ToolIdentity(
         capability="check_oauth_status",
         category="free",
         intent="Check whether the Schwab OAuth authorization flow has completed.",
     ),
     # Paid — write tier (brokerage reads)
-    "get_positions": ToolIdentity(
+    ToolIdentity(
         capability="get_brokerage_positions",
         category="write",
         intent="Get positions for a Schwab brokerage account.",
     ),
-    "get_balances": ToolIdentity(
+    ToolIdentity(
         capability="get_brokerage_balances",
         category="write",
         intent="Get account balances for a Schwab brokerage account.",
     ),
-    "get_quote": ToolIdentity(
+    ToolIdentity(
         capability="get_stock_quote",
         category="write",
         intent="Get real-time quotes for one or more ticker symbols.",
     ),
-    "get_movers": ToolIdentity(
+    ToolIdentity(
         capability="get_market_movers",
         category="write",
         intent="Get top movers for a market index.",
     ),
-    "get_market_hours": ToolIdentity(
+    ToolIdentity(
         capability="get_market_hours",
         category="write",
         intent="Get trading hours for equity, option, and other markets.",
     ),
-    "search_instruments": ToolIdentity(
+    ToolIdentity(
         capability="search_instruments",
         category="write",
         intent="Search for instruments by symbol, name, or CUSIP.",
     ),
     # Paid — heavy tier (complex data retrieval)
-    "get_option_chain": ToolIdentity(
+    ToolIdentity(
         capability="get_option_chain",
         category="heavy",
         intent="Get filtered option chain for spread evaluation.",
     ),
-    "get_price_history": ToolIdentity(
+    ToolIdentity(
         capability="get_price_history",
         category="heavy",
         intent="Get historical OHLCV price data for trend analysis.",
     ),
     # Paid — heavy tier (multi-record history scans)
-    "get_orders": ToolIdentity(
+    ToolIdentity(
         capability="get_brokerage_orders",
         category="heavy",
         intent="Get order history for a Schwab brokerage account.",
     ),
-    "get_order": ToolIdentity(
+    ToolIdentity(
         capability="get_brokerage_order",
         category="heavy",
         intent="Get details for a single order by ID.",
     ),
-    "get_transactions": ToolIdentity(
+    ToolIdentity(
         capability="get_brokerage_transactions",
         category="heavy",
         intent="Get transaction history for a Schwab brokerage account.",
     ),
-    "get_transaction": ToolIdentity(
+    ToolIdentity(
         capability="get_brokerage_transaction",
         category="heavy",
         intent="Get details for a single transaction by ID.",
     ),
-}
+]
+
+TOOL_REGISTRY: dict[str, ToolIdentity] = {ti.tool_id: ti for ti in _DOMAIN_TOOLS}
 
 # Patron credentials use OAuth2 browser dance, not Secure Courier
 PATRON_CREDENTIAL_SERVICE = "schwab"
@@ -589,7 +591,7 @@ async def check_oauth_status(patron_npub: str) -> dict[str, Any]:
 
 
 @tool
-@runtime.paid_tool("get_positions", catch_errors=True)
+@runtime.paid_tool(capability_uuid("get_brokerage_positions"), catch_errors=True)
 async def get_positions(npub: NpubField = "") -> str | dict[str, Any]:
     """Get positions for a Schwab account.
     Args:
@@ -603,7 +605,7 @@ async def get_positions(npub: NpubField = "") -> str | dict[str, Any]:
 
 
 @tool
-@runtime.paid_tool("get_balances", catch_errors=True)
+@runtime.paid_tool(capability_uuid("get_brokerage_balances"), catch_errors=True)
 async def get_balances(npub: NpubField = "") -> str | dict[str, Any]:
     """Get account balances for a Schwab account.
     Args:
@@ -617,7 +619,7 @@ async def get_balances(npub: NpubField = "") -> str | dict[str, Any]:
 
 
 @tool
-@runtime.paid_tool("get_quote", catch_errors=True)
+@runtime.paid_tool(capability_uuid("get_stock_quote"), catch_errors=True)
 async def get_quote(symbols: str, npub: NpubField = "") -> str | dict[str, Any]:
     """Get real-time quotes for one or more symbols.
     Args:
@@ -632,7 +634,7 @@ async def get_quote(symbols: str, npub: NpubField = "") -> str | dict[str, Any]:
 
 
 @tool
-@runtime.paid_tool("get_option_chain", catch_errors=True)
+@runtime.paid_tool(capability_uuid("get_option_chain"), catch_errors=True)
 async def get_option_chain(
     symbol: str,
     strike_count: int = 20,
@@ -658,7 +660,7 @@ async def get_option_chain(
 
 
 @tool
-@runtime.paid_tool("get_price_history", catch_errors=True)
+@runtime.paid_tool(capability_uuid("get_price_history"), catch_errors=True)
 async def get_price_history(
     symbol: str,
     period_type: str = "month",
@@ -686,7 +688,7 @@ async def get_price_history(
 
 
 @tool
-@runtime.paid_tool("get_movers", catch_errors=True)
+@runtime.paid_tool(capability_uuid("get_market_movers"), catch_errors=True)
 async def get_movers(
     index: str = "$SPX",
     sort: str = "PERCENT_CHANGE_UP",
@@ -708,7 +710,7 @@ async def get_movers(
 
 
 @tool
-@runtime.paid_tool("get_market_hours", catch_errors=True)
+@runtime.paid_tool(capability_uuid("get_market_hours"), catch_errors=True)
 async def get_market_hours(
     markets: str = "equity,option",
     date: str = "",
@@ -731,7 +733,7 @@ async def get_market_hours(
 
 
 @tool
-@runtime.paid_tool("search_instruments", catch_errors=True)
+@runtime.paid_tool(capability_uuid("search_instruments"), catch_errors=True)
 async def search_instruments(
     symbol: str,
     projection: str = "symbol-search",
@@ -754,7 +756,7 @@ async def search_instruments(
 
 
 @tool
-@runtime.paid_tool("get_orders", catch_errors=True)
+@runtime.paid_tool(capability_uuid("get_brokerage_orders"), catch_errors=True)
 async def get_orders(
     from_date: str = "",
     to_date: str = "",
@@ -782,7 +784,7 @@ async def get_orders(
 
 
 @tool
-@runtime.paid_tool("get_order", catch_errors=True)
+@runtime.paid_tool(capability_uuid("get_brokerage_order"), catch_errors=True)
 async def get_order(order_id: str, npub: NpubField = "") -> str | dict[str, Any]:
     """Get details for a single order by ID.
     Args:
@@ -797,7 +799,7 @@ async def get_order(order_id: str, npub: NpubField = "") -> str | dict[str, Any]
 
 
 @tool
-@runtime.paid_tool("get_transactions", catch_errors=True)
+@runtime.paid_tool(capability_uuid("get_brokerage_transactions"), catch_errors=True)
 async def get_transactions(
     from_date: str = "",
     to_date: str = "",
@@ -825,7 +827,7 @@ async def get_transactions(
 
 
 @tool
-@runtime.paid_tool("get_transaction", catch_errors=True)
+@runtime.paid_tool(capability_uuid("get_brokerage_transaction"), catch_errors=True)
 async def get_transaction(transaction_id: str, npub: NpubField = "") -> str | dict[str, Any]:
     """Get details for a single transaction by ID.
     Args:
