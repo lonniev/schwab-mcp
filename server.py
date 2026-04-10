@@ -318,7 +318,7 @@ async def _ensure_operator_credentials() -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Horizon auth helpers
+# Schwab OAuth2 helpers
 # ---------------------------------------------------------------------------
 
 
@@ -341,7 +341,7 @@ async def _get_redirect_uri() -> str:
 # Session resolution helpers
 # ---------------------------------------------------------------------------
 
-# Horizon user_id → patron npub mapping (populated on OAuth success)
+# Session user_id → patron npub mapping (populated on Schwab OAuth success)
 _npub_for_user: dict[str, str] = {}
 
 
