@@ -828,7 +828,9 @@ async def get_brokerage_transactions(
 
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_transaction"), catch_errors=True)
-async def get_brokerage_transaction(transaction_id: str, npub: NpubField = "") -> str | dict[str, Any]:
+async def get_brokerage_transaction(
+    transaction_id: str, npub: NpubField = "",
+) -> str | dict[str, Any]:
     """Get details for a single transaction by ID.
     Args:
         transaction_id: The Schwab transaction ID.
