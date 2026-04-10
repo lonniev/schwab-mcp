@@ -592,7 +592,7 @@ async def check_oauth_status(patron_npub: str) -> dict[str, Any]:
 
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_positions"), catch_errors=True)
-async def get_positions(npub: NpubField = "") -> str | dict[str, Any]:
+async def get_brokerage_positions(npub: NpubField = "") -> str | dict[str, Any]:
     """Get positions for a Schwab account.
     Args:
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
@@ -606,7 +606,7 @@ async def get_positions(npub: NpubField = "") -> str | dict[str, Any]:
 
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_balances"), catch_errors=True)
-async def get_balances(npub: NpubField = "") -> str | dict[str, Any]:
+async def get_brokerage_balances(npub: NpubField = "") -> str | dict[str, Any]:
     """Get account balances for a Schwab account.
     Args:
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
@@ -620,7 +620,7 @@ async def get_balances(npub: NpubField = "") -> str | dict[str, Any]:
 
 @tool
 @runtime.paid_tool(capability_uuid("get_stock_quote"), catch_errors=True)
-async def get_quote(symbols: str, npub: NpubField = "") -> str | dict[str, Any]:
+async def get_stock_quote(symbols: str, npub: NpubField = "") -> str | dict[str, Any]:
     """Get real-time quotes for one or more symbols.
     Args:
         symbols: Comma-separated ticker symbols (e.g. "AAPL,MSFT,TSLA").
@@ -689,7 +689,7 @@ async def get_price_history(
 
 @tool
 @runtime.paid_tool(capability_uuid("get_market_movers"), catch_errors=True)
-async def get_movers(
+async def get_market_movers(
     index: str = "$SPX",
     sort: str = "PERCENT_CHANGE_UP",
     frequency: int = 0,
@@ -757,7 +757,7 @@ async def search_instruments(
 
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_orders"), catch_errors=True)
-async def get_orders(
+async def get_brokerage_orders(
     from_date: str = "",
     to_date: str = "",
     status_filter: str = "",
@@ -785,7 +785,7 @@ async def get_orders(
 
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_order"), catch_errors=True)
-async def get_order(order_id: str, npub: NpubField = "") -> str | dict[str, Any]:
+async def get_brokerage_order(order_id: str, npub: NpubField = "") -> str | dict[str, Any]:
     """Get details for a single order by ID.
     Args:
         order_id: The Schwab order ID.
@@ -800,7 +800,7 @@ async def get_order(order_id: str, npub: NpubField = "") -> str | dict[str, Any]
 
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_transactions"), catch_errors=True)
-async def get_transactions(
+async def get_brokerage_transactions(
     from_date: str = "",
     to_date: str = "",
     transaction_types: str = "",
@@ -828,7 +828,7 @@ async def get_transactions(
 
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_transaction"), catch_errors=True)
-async def get_transaction(transaction_id: str, npub: NpubField = "") -> str | dict[str, Any]:
+async def get_brokerage_transaction(transaction_id: str, npub: NpubField = "") -> str | dict[str, Any]:
     """Get details for a single transaction by ID.
     Args:
         transaction_id: The Schwab transaction ID.
