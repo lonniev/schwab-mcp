@@ -1,6 +1,6 @@
 [project]
 name = "schwab-mcp"
-version = "0.8.9"
+version = "0.8.10"
 description = "Multi-tenant FastMCP server for Charles Schwab brokerage data, monetized via DPYC Tollbooth"
 license = "Apache-2.0"
 requires-python = ">=3.12"
@@ -10,7 +10,7 @@ dependencies = [
     "pydantic>=2.0",
     "pydantic-settings>=2.0.0",
     "python-dotenv>=1.0.0",
-    "tollbooth-dpyc[nostr]>=0.4.8",
+    "tollbooth-dpyc[nostr]>=0.4.9",
 ]
 
 [project.optional-dependencies]
