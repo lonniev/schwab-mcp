@@ -14,6 +14,7 @@ from typing import Annotated, Any
 from fastmcp import FastMCP
 from pydantic import Field
 from tollbooth.credential_templates import CredentialTemplate, FieldSpec
+from tollbooth.credential_validators import validate_btcpay_creds, validate_required
 from tollbooth.runtime import OperatorRuntime, register_standard_tools
 from tollbooth.slug_tools import make_slug_tool
 from tollbooth.tool_identity import STANDARD_IDENTITIES, ToolIdentity, capability_uuid
@@ -254,6 +255,11 @@ runtime = OperatorRuntime(
         "Hi — I'm Schwab MCP, a Tollbooth service for read-only Schwab "
         "brokerage data. To come online, I need your BTCPay Server "
         "credentials and Schwab API app credentials."
+    ),
+    credential_validator=lambda creds: (
+        validate_btcpay_creds(creds)
+        + [e for e in [validate_required(creds.get("app_key", ""), "app_key")] if e]
+        + [e for e in [validate_required(creds.get("secret", ""), "secret")] if e]
     ),
 )
 
