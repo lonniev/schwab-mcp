@@ -348,11 +348,11 @@ async def _get_redirect_uri() -> str:
 # ---------------------------------------------------------------------------
 
 # Session user_id → patron npub mapping (populated on Schwab OAuth success)
-_npub_for_user: dict[str, str] = {}
+# Session identity is now npub-only — no Horizon user_id mapping needed.
 
 
 async def _restore_session_from_vault(
-    user_id: str, patron_npub: str,
+    session_key: str, patron_npub: str,
 ) -> tuple[Any, str]:
     """Attempt to restore a patron session from the encrypted vault.
 
@@ -388,13 +388,12 @@ async def _restore_session_from_vault(
             api_base=settings.schwab_trader_api,
         )
         session = set_session(
-            user_id,
+            session_key,
             creds["token_json"],
             creds.get("account_hash", ""),
             client,
             npub=patron_npub,
         )
-        _npub_for_user[user_id] = patron_npub
         logger.info("Restored session for %s from vault.", patron_npub[:20])
         return session, ""
     except Exception:
@@ -432,21 +431,20 @@ _SESSION_GUIDANCE: dict[str, str] = {
 }
 
 
-async def _require_session(user_id: str, npub: str = ""):
-    """Get per-user session, restoring from vault on cold start."""
+async def _require_session(npub: str):
+    """Get per-patron session by npub, restoring from vault on cold start."""
+    if not npub or not npub.startswith("npub1"):
+        raise ValueError("npub is required for session lookup.")
     from vault import get_session
 
-    session = get_session(user_id)
+    session = get_session(npub)
     if session is not None:
         return session
 
     # Try vault restoration (survives process restarts)
-    patron_npub = _npub_for_user.get(user_id) or npub
-    situation = "no_credentials"
-    if patron_npub:
-        restored, situation = await _restore_session_from_vault(user_id, patron_npub)
-        if restored is not None:
-            return restored
+    restored, situation = await _restore_session_from_vault(npub, npub)
+    if restored is not None:
+        return restored
 
     guidance = _SESSION_GUIDANCE.get(situation, _SESSION_GUIDANCE["no_credentials"])
     raise ValueError(guidance)
@@ -457,7 +455,7 @@ async def _require_session(user_id: str, npub: str = ""):
 # ---------------------------------------------------------------------------
 
 
-async def _check_oauth_via_collector(user_id: str, patron_npub: str) -> dict[str, Any]:
+async def _check_oauth_via_collector(session_key: str, patron_npub: str) -> dict[str, Any]:
     """Poll the external OAuth2 collector for the auth code, then activate session."""
     from oauth_flow import (
         exchange_code_for_token,
@@ -516,8 +514,7 @@ async def _check_oauth_via_collector(user_id: str, patron_npub: str) -> dict[str
         token_json,
         api_base=settings.schwab_trader_api,
     )
-    set_session(user_id, token_json, account_hash, client, npub=patron_npub)
-    _npub_for_user[user_id] = patron_npub
+    set_session(session_key, token_json, account_hash, client, npub=patron_npub)
 
     # Persist to vault for cross-restart restoration
     await runtime.store_patron_session(patron_npub, {
@@ -583,12 +580,10 @@ async def check_oauth_status(patron_npub: str) -> dict[str, Any]:
     Args:
         patron_npub: The same DPYC patron npub used in begin_oauth.
     """
-    try:
-        user_id = OperatorRuntime.require_user_id()
-    except ValueError as e:
-        return {"success": False, "error": str(e)}
+    if not patron_npub or not patron_npub.startswith("npub1"):
+        return {"success": False, "error": "patron_npub is required."}
 
-    return await _check_oauth_via_collector(user_id, patron_npub)
+    return await _check_oauth_via_collector(patron_npub, patron_npub)
 
 
 # ---------------------------------------------------------------------------
@@ -603,8 +598,7 @@ async def get_brokerage_positions(npub: NpubField = "") -> str | dict[str, Any]:
     Args:
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    user_id = OperatorRuntime.require_user_id()
-    session = await _require_session(user_id, npub=npub)
+    session = await _require_session(npub)
     from tools.account import get_positions as _get_positions
 
     return await _get_positions(session.client, session.account_hash)
@@ -617,8 +611,7 @@ async def get_brokerage_balances(npub: NpubField = "") -> str | dict[str, Any]:
     Args:
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    user_id = OperatorRuntime.require_user_id()
-    session = await _require_session(user_id, npub=npub)
+    session = await _require_session(npub)
     from tools.account import get_account_balances as _get_account_balances
 
     return await _get_account_balances(session.client, session.account_hash)
@@ -632,8 +625,7 @@ async def get_stock_quote(symbols: str, npub: NpubField = "") -> str | dict[str,
         symbols: Comma-separated ticker symbols (e.g. "AAPL,MSFT,TSLA").
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    user_id = OperatorRuntime.require_user_id()
-    session = await _require_session(user_id, npub=npub)
+    session = await _require_session(npub)
     from tools.market import get_quote as _get_quote
 
     return await _get_quote(session.client, symbols)
@@ -656,8 +648,7 @@ async def get_option_chain(
         days_to_expiration: Maximum days to expiration to include.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    user_id = OperatorRuntime.require_user_id()
-    session = await _require_session(user_id, npub=npub)
+    session = await _require_session(npub)
     from tools.options import get_option_chain as _get_option_chain
 
     return await _get_option_chain(
@@ -684,8 +675,7 @@ async def get_price_history(
         frequency: Frequency interval.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    user_id = OperatorRuntime.require_user_id()
-    session = await _require_session(user_id, npub=npub)
+    session = await _require_session(npub)
     from tools.market import get_price_history as _get_price_history
 
     return await _get_price_history(
@@ -708,8 +698,7 @@ async def get_market_movers(
         frequency: 0 = all, 1 = 1-5%, 2 = 5-10%, 3 = 10-20%, 4 = 20%+.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    user_id = OperatorRuntime.require_user_id()
-    session = await _require_session(user_id, npub=npub)
+    session = await _require_session(npub)
     from tools.market import get_movers as _get_movers
 
     return await _get_movers(session.client, index, sort, frequency)
@@ -729,8 +718,7 @@ async def get_market_hours(
         date: ISO date to check (e.g. "2026-03-15"). Defaults to today.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    user_id = OperatorRuntime.require_user_id()
-    session = await _require_session(user_id, npub=npub)
+    session = await _require_session(npub)
     from tools.market import get_market_hours as _get_market_hours
 
     return await _get_market_hours(
@@ -752,8 +740,7 @@ async def search_instruments(
             "desc-regex", or "fundamental".
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    user_id = OperatorRuntime.require_user_id()
-    session = await _require_session(user_id, npub=npub)
+    session = await _require_session(npub)
     from tools.market import search_instruments as _search_instruments
 
     return await _search_instruments(
@@ -776,8 +763,7 @@ async def get_brokerage_orders(
         status_filter: Optional status filter (e.g. "FILLED", "CANCELED", "WORKING").
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    user_id = OperatorRuntime.require_user_id()
-    session = await _require_session(user_id, npub=npub)
+    session = await _require_session(npub)
     from tools.account import get_orders as _get_orders
 
     return await _get_orders(
@@ -797,8 +783,7 @@ async def get_brokerage_order(order_id: str, npub: NpubField = "") -> str | dict
         order_id: The Schwab order ID.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    user_id = OperatorRuntime.require_user_id()
-    session = await _require_session(user_id, npub=npub)
+    session = await _require_session(npub)
     from tools.account import get_order as _get_order
 
     return await _get_order(session.client, session.account_hash, order_id)
@@ -819,8 +804,7 @@ async def get_brokerage_transactions(
         transaction_types: Comma-separated types: TRADE, DIVIDEND, CASH_IN_OR_CASH_OUT, etc.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    user_id = OperatorRuntime.require_user_id()
-    session = await _require_session(user_id, npub=npub)
+    session = await _require_session(npub)
     from tools.account import get_transactions as _get_transactions
 
     return await _get_transactions(
@@ -842,8 +826,7 @@ async def get_brokerage_transaction(
         transaction_id: The Schwab transaction ID.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
-    user_id = OperatorRuntime.require_user_id()
-    session = await _require_session(user_id, npub=npub)
+    session = await _require_session(npub)
     from tools.account import get_transaction as _get_transaction
 
     return await _get_transaction(
