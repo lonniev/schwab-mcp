@@ -593,7 +593,7 @@ async def check_oauth_status(patron_npub: str) -> dict[str, Any]:
 
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_positions"), catch_errors=True)
-async def get_brokerage_positions(npub: NpubField = "") -> str | dict[str, Any]:
+async def get_brokerage_positions(npub: NpubField = "", proof: str = "") -> str | dict[str, Any]:
     """Get positions for a Schwab account.
     Args:
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
@@ -606,7 +606,7 @@ async def get_brokerage_positions(npub: NpubField = "") -> str | dict[str, Any]:
 
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_balances"), catch_errors=True)
-async def get_brokerage_balances(npub: NpubField = "") -> str | dict[str, Any]:
+async def get_brokerage_balances(npub: NpubField = "", proof: str = "") -> str | dict[str, Any]:
     """Get account balances for a Schwab account.
     Args:
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
@@ -619,7 +619,7 @@ async def get_brokerage_balances(npub: NpubField = "") -> str | dict[str, Any]:
 
 @tool
 @runtime.paid_tool(capability_uuid("get_stock_quote"), catch_errors=True)
-async def get_stock_quote(symbols: str, npub: NpubField = "") -> str | dict[str, Any]:
+async def get_stock_quote(symbols: str, npub: NpubField = "", proof: str = "") -> str | dict[str, Any]:
     """Get real-time quotes for one or more symbols.
     Args:
         symbols: Comma-separated ticker symbols (e.g. "AAPL,MSFT,TSLA").
@@ -638,7 +638,7 @@ async def get_option_chain(
     strike_count: int = 20,
     contract_type: str = "ALL",
     days_to_expiration: int = 21,
-    npub: NpubField = "",
+    npub: NpubField = "", proof: str = "",
 ) -> str | dict[str, Any]:
     """Get filtered option chain for spread evaluation.
     Args:
@@ -664,7 +664,7 @@ async def get_price_history(
     period: int = 1,
     frequency_type: str = "daily",
     frequency: int = 1,
-    npub: NpubField = "",
+    npub: NpubField = "", proof: str = "",
 ) -> str | dict[str, Any]:
     """Get historical OHLCV price data for trend analysis.
     Args:
@@ -689,7 +689,7 @@ async def get_market_movers(
     index: str = "$SPX",
     sort: str = "PERCENT_CHANGE_UP",
     frequency: int = 0,
-    npub: NpubField = "",
+    npub: NpubField = "", proof: str = "",
 ) -> str | dict[str, Any]:
     """Get top movers for a market index.
     Args:
@@ -709,7 +709,7 @@ async def get_market_movers(
 async def get_market_hours(
     markets: str = "equity,option",
     date: str = "",
-    npub: NpubField = "",
+    npub: NpubField = "", proof: str = "",
 ) -> str | dict[str, Any]:
     """Get market hours for equity, option, bond, future, or forex markets.
 
@@ -731,7 +731,7 @@ async def get_market_hours(
 async def search_instruments(
     symbol: str,
     projection: str = "symbol-search",
-    npub: NpubField = "",
+    npub: NpubField = "", proof: str = "",
 ) -> str | dict[str, Any]:
     """Search for instruments by symbol, name, or CUSIP.
     Args:
@@ -754,7 +754,7 @@ async def get_brokerage_orders(
     from_date: str = "",
     to_date: str = "",
     status_filter: str = "",
-    npub: NpubField = "",
+    npub: NpubField = "", proof: str = "",
 ) -> str | dict[str, Any]:
     """Get order history for your Schwab account.
     Args:
@@ -777,7 +777,7 @@ async def get_brokerage_orders(
 
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_order"), catch_errors=True)
-async def get_brokerage_order(order_id: str, npub: NpubField = "") -> str | dict[str, Any]:
+async def get_brokerage_order(order_id: str, npub: NpubField = "", proof: str = "") -> str | dict[str, Any]:
     """Get details for a single order by ID.
     Args:
         order_id: The Schwab order ID.
@@ -795,7 +795,7 @@ async def get_brokerage_transactions(
     from_date: str = "",
     to_date: str = "",
     transaction_types: str = "",
-    npub: NpubField = "",
+    npub: NpubField = "", proof: str = "",
 ) -> str | dict[str, Any]:
     """Get transaction history for your Schwab account.
     Args:
@@ -819,7 +819,7 @@ async def get_brokerage_transactions(
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_transaction"), catch_errors=True)
 async def get_brokerage_transaction(
-    transaction_id: str, npub: NpubField = "",
+    transaction_id: str, npub: NpubField = "", proof: str = "",
 ) -> str | dict[str, Any]:
     """Get details for a single transaction by ID.
     Args:
