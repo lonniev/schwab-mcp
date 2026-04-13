@@ -12,17 +12,22 @@ Multi-tenant [MCP](https://modelcontextprotocol.io/) server exposing Charles Sch
 
 ### Brokerage (paid — credit-gated)
 
-| Tool | Cost | Description |
+All paid tools require `npub` and `proof` parameters for identity verification.
+
+| Tool | Tier | Description |
 |------|------|-------------|
-| `get_positions` | 5 api_sats | Portfolio positions with automatic options spread detection (bull put / bear call) |
-| `get_balances` | 5 api_sats | Cash, buying power, net liquidation value, day P&L |
-| `get_quote` | 5 api_sats | Real-time quotes for one or more symbols |
-| `get_option_chain` | 10 api_sats | Filtered option chain with Greeks, IV, OTM%, and OI threshold |
-| `get_price_history` | 10 api_sats | Historical OHLCV candle data |
-| `get_orders` | 15 api_sats | Order history with multi-leg spread support (default 30 days) |
-| `get_order` | 8 api_sats | Single order detail by ID |
-| `get_transactions` | 15 api_sats | Transaction history — trades, dividends, cash movements (default 30 days) |
-| `get_transaction` | 8 api_sats | Single transaction detail by ID |
+| `get_brokerage_positions` | write | Portfolio positions with automatic options spread detection (bull put / bear call) |
+| `get_brokerage_balances` | write | Cash, buying power, net liquidation value, day P&L |
+| `get_stock_quote` | write | Real-time quotes for one or more symbols |
+| `get_market_movers` | write | Top movers for a market index ($SPX, $DJI, $COMPX) |
+| `get_market_hours` | write | Trading hours for equity, option, bond, future, forex markets |
+| `search_instruments` | write | Search for instruments by symbol, name, or CUSIP |
+| `get_option_chain` | heavy | Filtered option chain with Greeks, IV, OTM%, and OI threshold |
+| `get_price_history` | heavy | Historical OHLCV candle data |
+| `get_brokerage_orders` | heavy | Order history with multi-leg spread support (default 30 days) |
+| `get_brokerage_order` | heavy | Single order detail by ID |
+| `get_brokerage_transactions` | heavy | Transaction history — trades, dividends, cash movements (default 30 days) |
+| `get_brokerage_transaction` | heavy | Single transaction detail by ID |
 
 ### Free
 
@@ -35,17 +40,21 @@ Multi-tenant [MCP](https://modelcontextprotocol.io/) server exposing Charles Sch
 | `receive_credentials` | Pick up credentials from the encrypted vault |
 | `forget_credentials` | Delete vaulted credentials for re-delivery |
 | `check_balance` | View credit balance and usage |
+| `check_price` | Preview tool cost before calling |
 | `purchase_credits` | Create a Lightning invoice to buy credits |
 | `check_payment` | Verify Lightning payment and credit the balance |
+| `account_statement` | View account statement summary |
 
 All brokerage tools are read-only. No orders are placed.
 
 ## Architecture
 
-- **Multi-tenant**: operator delivers `app_key` / `secret` via Secure Courier (`service="schwab-operator"`); each user delivers `token_json` + `account_hash` via Secure Courier (`service="schwab"`). No Schwab credentials in env vars
+- **Multi-tenant**: operator delivers `btcpay_host` + `btcpay_api_key` + `btcpay_store_id` + `app_key` + `secret` via Secure Courier (`service="schwab-operator"`); each patron authenticates via OAuth2 browser flow. Sessions are keyed by npub. No Schwab credentials in env vars
 - **Direct httpx**: thin `SchwabClient` wrapper with bearer auth and proactive token refresh (no third-party Schwab SDK)
 - **Tollbooth DPYC&trade;**: pre-funded Lightning balances, Authority-certified purchase orders, NeonVault (Postgres) for ledger persistence
 - **Registry discovery**: OAuth2 collector URL resolved from DPYC&trade; registry at runtime (no `OAUTH_COLLECTOR_URL` env var needed)
+- **Credential validation**: operator credentials are validated at receive time — `btcpay_host`, `app_key`, and `secret` must all be present before vaulting
+- **Proof-based identity**: all paid tools accept a `proof` parameter for cryptographic identity verification alongside `npub`
 
 ---
 
@@ -85,7 +94,7 @@ The Operator collects Lightning payments from Patrons via [BTCPay Server](https:
 - A BTCPay Server instance (self-hosted or hosted by your Authority)
 - A **Store ID** and **API Key** with invoice creation permissions
 
-Set these as environment variables (`BTCPAY_HOST`, `BTCPAY_STORE_ID`, `BTCPAY_API_KEY`) in your deployment.
+These credentials are delivered via Secure Courier (see step 6), not set as environment variables.
 
 ### 4. For Operators — Register with a Tollbooth Authority
 
@@ -105,13 +114,22 @@ Before your service can issue credits to Patrons, you need cert-sats:
 
 Your cert-sat balance is consumed automatically when Patrons purchase credits from your service.
 
-### 6. For Operators — Deliver Schwab API Credentials (Secure Courier)
+### 6. For Operators — Deliver Credentials (Secure Courier)
 
-The Operator must register a [Schwab Developer](https://developer.schwab.com/) app and deliver the API credentials via Secure Courier. Credentials **never appear in chat**.
+The Operator must register a [Schwab Developer](https://developer.schwab.com/) app and deliver both BTCPay and Schwab API credentials via Secure Courier. Credentials **never appear in chat**.
 
 1. Call `request_credential_channel(service="schwab-operator", recipient_npub=<operator_npub>)` — a welcome DM arrives in your Nostr client ([Oxcart](https://github.com/nickkawai/Oxcart))
-2. In Oxcart, reply to the DM with: `{"app_key": "YOUR_APP_KEY", "secret": "YOUR_SECRET"}`
-3. Call `receive_credentials(sender_npub=<operator_npub>, service="schwab-operator")` — credentials are vaulted
+2. In Oxcart, reply to the DM with:
+   ```json
+   {
+     "btcpay_host": "https://btcpay.example.com",
+     "btcpay_api_key": "YOUR_API_KEY",
+     "btcpay_store_id": "YOUR_STORE_ID",
+     "app_key": "YOUR_SCHWAB_APP_KEY",
+     "secret": "YOUR_SCHWAB_SECRET"
+   }
+   ```
+3. Call `receive_credentials(sender_npub=<operator_npub>, service="schwab-operator")` — credentials are validated (`btcpay_host`, `app_key`, and `secret` must all be present) and vaulted
 
 This is a one-time setup per deployment.
 
@@ -123,22 +141,22 @@ Patrons pre-fund a satoshi balance and consume brokerage tools against it — no
 2. Pay the invoice with any Lightning wallet (Phoenix, Breez, Zeus, etc.)
 3. Call `check_payment(invoice_id="...")` — confirms settlement and credits your balance
 
-Your balance depletes as you call paid tools. Recharge anytime with another `purchase_credits` call. Check your balance at any time with `check_balance` (free).
+Your balance depletes as you call paid tools. Recharge anytime with another `purchase_credits` call. Check your balance at any time with `check_balance` (free). Preview any tool's cost with `check_price` (free).
 
-### 8. For Patrons — Deliver Your Schwab OAuth Token
+### 8. For Patrons — Connect Your Schwab Account
 
 You need to authorize schwab-mcp to read your Schwab account. Choose one method:
 
-**Option A — OAuth Flow (recommended):**
+**Option A — OAuth2 Flow (recommended):**
 
 1. Call `begin_oauth(patron_npub=<your_npub>)` — returns a Schwab authorization URL
 2. Open the URL in your browser and log in to Schwab
 3. Schwab redirects back to the server — token exchange happens automatically
-4. Call `check_oauth_status()` to confirm your session is active
+4. Call `check_oauth_status(patron_npub=<your_npub>)` to confirm your session is active
 
-No curl commands, no copy-paste. Your credentials never appear in the chat.
+No curl commands, no copy-paste. Your credentials never appear in the chat. Sessions are keyed by your npub and persist across server restarts via the encrypted vault.
 
-**Option B — Manual Secure Courier:**
+**Option B — Manual Secure Courier (fallback):**
 
 If the OAuth redirect is unreachable (e.g., firewalled local dev), you can deliver credentials manually via encrypted Nostr DM. See the [tollbooth-oauth2-collector](https://github.com/lonniev/tollbooth-oauth2-collector) companion repo for full instructions on generating `token_json` + `account_hash`, then:
 
@@ -150,12 +168,15 @@ If the OAuth redirect is unreachable (e.g., firewalled local dev), you can deliv
 
 Once your session is active, ask your AI agent naturally:
 
-- *"Show me my positions"* — calls `get_positions` (5 api_sats)
-- *"What's my account balance?"* — calls `get_balances` (5 api_sats)
-- *"Get a quote for AAPL and MSFT"* — calls `get_quote` (5 api_sats)
-- *"Show me the GLD option chain for next month"* — calls `get_option_chain` (10 api_sats)
-- *"What are my recent orders?"* — calls `get_orders` (15 api_sats)
-- *"Show me my trade history for the last week"* — calls `get_transactions` (15 api_sats)
+- *"Show me my positions"* — calls `get_brokerage_positions`
+- *"What's my account balance?"* — calls `get_brokerage_balances`
+- *"Get a quote for AAPL and MSFT"* — calls `get_stock_quote`
+- *"What are today's biggest gainers?"* — calls `get_market_movers`
+- *"Is the market open tomorrow?"* — calls `get_market_hours`
+- *"Look up the ticker for Berkshire Hathaway"* — calls `search_instruments`
+- *"Show me the GLD option chain for next month"* — calls `get_option_chain`
+- *"What are my recent orders?"* — calls `get_brokerage_orders`
+- *"Show me my trade history for the last week"* — calls `get_brokerage_transactions`
 
 Free tools are always available:
 
@@ -181,13 +202,13 @@ Free tools are always available:
 
 ## Deployment
 
-schwab-mcp is designed to run on a cloud MCP host such as [FastMCP Cloud](https://www.fastmcp.cloud/) (Horizon by Prefect). Any MCP client (Claude.ai, Claude Desktop, Cursor, your own agent) can connect via Horizon:
+schwab-mcp runs on [FastMCP Cloud](https://www.fastmcp.cloud/). Any MCP client (Claude.ai, Claude Desktop, Cursor, your own agent) can connect:
 
 ```
 https://www.fastmcp.cloud/server/lonniev/schwab-mcp
 ```
 
-Authentication is automatic — Horizon OAuth identifies each patron. No API keys to manage on the client side.
+Patron identity is established via the OAuth2 flow (`begin_oauth` / `check_oauth_status`) or Secure Courier. Sessions are keyed by npub.
 
 ### Operator Environment Variables
 
@@ -198,19 +219,14 @@ The Operator configures these on the cloud host (e.g., FastMCP Cloud environment
 | `SCHWAB_TRADER_API` | No | API base URL (default `https://api.schwabapi.com`) |
 | `TOLLBOOTH_NOSTR_OPERATOR_NSEC` | Yes | Nostr signing key for Secure Courier |
 | `NEON_DATABASE_URL` | Yes | Postgres for NeonVault (ledger + credential persistence) |
-| `BTCPAY_HOST` / `BTCPAY_STORE_ID` / `BTCPAY_API_KEY` | Yes | BTCPay Server for Lightning invoices |
 
-All Schwab credentials flow exclusively through Secure Courier:
-- **Operator** delivers `app_key` + `secret` via `service="schwab-operator"` (one-time, mapped internally to client_id/client_secret)
-- **Patron** delivers `token_json` + `account_hash` via `service="schwab"` (per-user)
-
-No Schwab secrets ever appear in env vars or chat.
+BTCPay credentials (`btcpay_host`, `btcpay_api_key`, `btcpay_store_id`) and Schwab API credentials (`app_key`, `secret`) are delivered exclusively through Secure Courier (`service="schwab-operator"`), validated at receive time, and stored in the encrypted vault. No secrets in env vars or chat.
 
 ## Development
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - A [Schwab Developer](https://developer.schwab.com/) app with API credentials
 - [Oxcart](https://github.com/nickkawai/Oxcart) Nostr client for Secure Courier credential delivery
 
@@ -225,22 +241,20 @@ uv run pytest tests/ -v
 
 ```
 schwab-mcp/
-  server.py            # FastMCP server, singletons, credit gating, 18 tool endpoints
+  server.py            # FastMCP server, OperatorRuntime, credit gating, domain tool endpoints
   schwab_client.py     # Thin async httpx client — bearer auth + token refresh
   vault.py             # Per-user session management (in-memory cache)
-  auth.py              # CLI bootstrap message (credentials via Secure Courier)
   oauth_flow.py        # OAuth2 authorization code flow (state tokens, exchange, callback)
   settings.py          # pydantic-settings (env vars, .env file)
   models.py            # Pydantic response models
   tools/
     account.py         # Positions, balances, orders, transactions (spread detection)
-    market.py          # Quotes + price history
+    market.py          # Quotes, price history, market movers, market hours, instrument search
     options.py         # Option chain retrieval + filtering
   tests/
     test_schwab_client.py  # httpx client, token refresh, URL building
     test_server.py         # Singletons, credit gating, Secure Courier callback
     test_vault.py          # Session management
-    test_auth.py           # Client creation
     test_account.py        # Position, balance, order, transaction parsing
     test_market.py         # Quote + price history formatting
     test_options.py        # Option chain filtering
