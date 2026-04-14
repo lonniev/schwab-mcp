@@ -283,11 +283,6 @@ register_standard_tools(
     service_version=_get_version(),
 )
 
-# OAuth sessions prove patron identity — waive proof for session holders.
-runtime.set_session_verifier(
-    lambda npub: __import__("vault").get_session(npub) is not None
-)
-
 
 # ---------------------------------------------------------------------------
 # Operator credential cache (delivered via Secure Courier)
