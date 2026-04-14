@@ -46,9 +46,9 @@ mcp = FastMCP(
         'service="schwab-operator")`\n\n'
         "3. **Patron onboarding** (per-user) — choose one:\n\n"
         "   **Option A — OAuth (recommended):**\n"
-        "   - Call `begin_oauth(npub=<your_npub>)` to get an authorization URL\n"
+        "   - Call `begin_oauth(patron_npub=<your_npub>)` to get an authorization URL\n"
         "   - Open the URL in your browser and log in to Schwab\n"
-        "   - Call `check_oauth_status(npub=<your_npub>)` to confirm session activation\n\n"
+        "   - Call `check_oauth_status(patron_npub=<your_npub>)` to confirm session activation\n\n"
         "   **Option B — Manual Secure Courier:**\n"
         "   - Get your **patron npub** from the dpyc-oracle's how_to_join() tool\n"
         "   - Call `request_credential_channel(recipient_npub=<patron_npub>)` "
@@ -531,15 +531,15 @@ async def _check_oauth_via_collector(session_key: str, patron_npub: str) -> dict
 
 
 @tool
-async def begin_oauth(npub: str) -> dict[str, Any]:
+async def begin_oauth(patron_npub: str) -> dict[str, Any]:
     """Start the OAuth2 authorization flow to connect your Schwab account.
 
     Returns an authorization URL -- open it in your browser to log in to
-    Schwab and authorize. After authorizing, call check_oauth_status with
-    the same npub to confirm your session is active.
+    Schwab and authorize. After authorizing, call check_oauth_status
+    with the same patron_npub to confirm your session is active.
 
     Args:
-        npub: Your DPYC patron Nostr public key (npub1...).
+        patron_npub: Your DPYC patron Nostr public key (npub1...).
     """
     try:
         op_creds = await _ensure_operator_credentials()
@@ -554,7 +554,7 @@ async def begin_oauth(npub: str) -> dict[str, Any]:
     from oauth_flow import begin_oauth_flow
 
     result = begin_oauth_flow(
-        patron_npub=npub,
+        patron_npub=patron_npub,
         client_id=op_creds["client_id"],
         redirect_uri=redirect_uri,
     )
@@ -571,19 +571,19 @@ async def begin_oauth(npub: str) -> dict[str, Any]:
 
 
 @tool
-async def check_oauth_status(npub: str) -> dict[str, Any]:
+async def check_oauth_status(patron_npub: str) -> dict[str, Any]:
     """Check whether your OAuth authorization flow has completed.
 
     Call this after opening the authorization URL from begin_oauth
     and completing the Schwab login in your browser.
 
     Args:
-        npub: The same DPYC patron npub used in begin_oauth.
+        patron_npub: The same DPYC patron npub used in begin_oauth.
     """
-    if not npub or not npub.startswith("npub1"):
-        return {"success": False, "error": "npub is required."}
+    if not patron_npub or not patron_npub.startswith("npub1"):
+        return {"success": False, "error": "patron_npub is required."}
 
-    return await _check_oauth_via_collector(npub, npub)
+    return await _check_oauth_via_collector(patron_npub, patron_npub)
 
 
 # ---------------------------------------------------------------------------
