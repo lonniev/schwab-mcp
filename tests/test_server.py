@@ -50,11 +50,13 @@ class TestToolRegistry:
         """Look up identity by capability name."""
         return next(ti for ti in registry.values() if ti.capability == cap)
 
-    def test_free_tools_have_free_category(self):
-        from server import TOOL_REGISTRY
+    def test_oauth_tools_in_standard_identities(self):
+        """OAuth tools are now standard (from wheel), not domain-specific."""
+        from tollbooth.tool_identity import STANDARD_IDENTITIES
 
-        assert self._by_capability(TOOL_REGISTRY, "begin_oauth").category == "free"
-        assert self._by_capability(TOOL_REGISTRY, "check_oauth_status").category == "free"
+        caps = {ti.capability for ti in STANDARD_IDENTITIES.values()}
+        assert "begin_oauth" in caps
+        assert "check_oauth_status" in caps
 
     def test_paid_tools_have_paid_category(self):
         from server import TOOL_REGISTRY
@@ -71,42 +73,6 @@ class TestToolRegistry:
         assert self._by_capability(TOOL_REGISTRY, "get_price_history").category == "heavy"
 
 
-class TestGetRedirectUri:
-    """Tests for _get_redirect_uri helper (registry-based collector discovery)."""
-
-    @pytest.mark.asyncio
-    async def test_uses_registry_collector_url(self):
-        """_get_redirect_uri resolves callback URL from DPYC registry."""
-        mock_svc = {
-            "url": "https://callback.web.val.run",
-            "npub": "npub1...",
-            "name": "tollbooth-oauth2-callback",
-        }
-        with patch(
-            "tollbooth.resolve_service_by_name",
-            new_callable=AsyncMock,
-            return_value=mock_svc,
-        ):
-            from server import _get_redirect_uri
-
-            result = await _get_redirect_uri()
-
-        assert result == "https://callback.web.val.run"
-
-    @pytest.mark.asyncio
-    async def test_raises_when_registry_fails(self):
-        """_get_redirect_uri raises RuntimeError when registry lookup fails."""
-        with patch(
-            "tollbooth.resolve_service_by_name",
-            new_callable=AsyncMock,
-            side_effect=Exception("registry unavailable"),
-        ):
-            from server import _get_redirect_uri
-
-            with pytest.raises(RuntimeError, match="Failed to resolve"):
-                await _get_redirect_uri()
-
-
 def _mock_resolve_service(collector_url="https://collector.example.com"):
     """Return an AsyncMock for resolve_service_by_name returning *collector_url*."""
     return AsyncMock(
@@ -118,149 +84,5 @@ def _mock_resolve_service(collector_url="https://collector.example.com"):
     )
 
 
-class TestCheckOAuthViaCollector:
-    """Tests for _check_oauth_via_collector (registry-based discovery, npub-as-state)."""
-
-    @pytest.mark.asyncio
-    async def test_pending_when_code_not_ready(self):
-        """Returns pending when collector has no code yet."""
-        with (
-            patch(
-                "server._get_settings",
-                return_value=MagicMock(dpyc_registry_cache_ttl_seconds=300),
-            ),
-            patch("tollbooth.registry.resolve_service_by_name", _mock_resolve_service()),
-            patch(
-                "oauth_flow.retrieve_code_from_collector",
-                new_callable=AsyncMock,
-                return_value=None,
-            ),
-        ):
-            from server import _check_oauth_via_collector
-
-            result = await _check_oauth_via_collector("user-1", "npub1abc")
-
-        assert result["status"] == "pending"
-
-    @pytest.mark.asyncio
-    async def test_completes_session_on_code_received(self):
-        """Activates session when collector returns an auth code."""
-        import time
-
-        mock_settings = MagicMock()
-        mock_settings.schwab_trader_api = "https://api.schwabapi.com"
-        mock_settings.dpyc_registry_cache_ttl_seconds = 300
-
-        mock_token = {
-            "access_token": "at-123",
-            "refresh_token": "rt-456",
-            "expires_at": time.time() + 1800,
-        }
-
-        mock_client = MagicMock()
-
-        with (
-            patch("server._get_settings", return_value=mock_settings),
-            patch("tollbooth.registry.resolve_service_by_name", _mock_resolve_service()),
-            patch(
-                "server._ensure_operator_credentials",
-                new_callable=AsyncMock,
-                return_value={"client_id": "cid", "client_secret": "csec"},
-            ),
-            patch(
-                "server._get_redirect_uri",
-                new_callable=AsyncMock,
-                return_value="https://collector.example.com/oauth/callback",
-            ),
-            patch(
-                "oauth_flow.retrieve_code_from_collector",
-                new_callable=AsyncMock,
-                return_value="auth-code-xyz",
-            ),
-            patch(
-                "oauth_flow.exchange_code_for_token",
-                new_callable=AsyncMock,
-                return_value=mock_token,
-            ),
-            patch(
-                "oauth_flow.fetch_account_hash",
-                new_callable=AsyncMock,
-                return_value="hash-abc",
-            ),
-            patch("vault._create_client", return_value=mock_client),
-            patch("vault.set_session") as mock_set_session,
-        ):
-            from server import _check_oauth_via_collector
-
-            result = await _check_oauth_via_collector("user-1", "npub1patron")
-
-        assert result["status"] == "completed"
-        assert "Session activated" in result["message"]
-        # Verify npub was passed to set_session
-        mock_set_session.assert_called_once()
-        call_kwargs = mock_set_session.call_args
-        npub_match = (
-            call_kwargs.kwargs.get("npub") == "npub1patron"
-            or call_kwargs[1].get("npub") == "npub1patron"
-        )
-        assert npub_match
-
-    @pytest.mark.asyncio
-    async def test_returns_error_when_registry_fails(self):
-        """Returns error when registry lookup for collector fails."""
-        from tollbooth.registry import RegistryError
-
-        with (
-            patch(
-                "server._get_settings",
-                return_value=MagicMock(dpyc_registry_cache_ttl_seconds=300),
-            ),
-            patch(
-                "tollbooth.registry.resolve_service_by_name",
-                new_callable=AsyncMock,
-                side_effect=RegistryError("No active member with service"),
-            ),
-        ):
-            from server import _check_oauth_via_collector
-
-            result = await _check_oauth_via_collector("user-1", "npub1abc")
-
-        assert result["success"] is False
-        assert "Failed to resolve" in result["error"]
-
-    @pytest.mark.asyncio
-    async def test_returns_failed_on_token_exchange_error(self):
-        """Returns failed when token exchange raises an exception."""
-        with (
-            patch(
-                "server._get_settings",
-                return_value=MagicMock(dpyc_registry_cache_ttl_seconds=300),
-            ),
-            patch("tollbooth.registry.resolve_service_by_name", _mock_resolve_service()),
-            patch(
-                "server._ensure_operator_credentials",
-                new_callable=AsyncMock,
-                return_value={"client_id": "cid", "client_secret": "csec"},
-            ),
-            patch(
-                "server._get_redirect_uri",
-                new_callable=AsyncMock,
-                return_value="https://collector.example.com/oauth/callback",
-            ),
-            patch(
-                "oauth_flow.retrieve_code_from_collector",
-                new_callable=AsyncMock,
-                return_value="auth-code-xyz",
-            ),
-            patch(
-                "oauth_flow.exchange_code_for_token",
-                new_callable=AsyncMock,
-                side_effect=Exception("Token exchange failed"),
-            ),
-        ):
-            from server import _check_oauth_via_collector
-
-            result = await _check_oauth_via_collector("user-1", "npub1abc")
-
-        assert result["status"] == "failed"
-        assert "Token exchange failed" in result["error"]
+    # OAuth tool tests removed — begin_oauth/check_oauth_status are now
+    # standard wheel tools tested in tollbooth-dpyc.

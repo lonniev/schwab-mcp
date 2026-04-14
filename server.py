@@ -15,6 +15,7 @@ from fastmcp import FastMCP
 from pydantic import Field
 from tollbooth.credential_templates import CredentialTemplate, FieldSpec
 from tollbooth.credential_validators import validate_btcpay_creds, validate_required
+from tollbooth.oauth_config import OAuthProviderConfig
 from tollbooth.runtime import OperatorRuntime, register_standard_tools
 from tollbooth.slug_tools import make_slug_tool
 from tollbooth.tool_identity import STANDARD_IDENTITIES, ToolIdentity, capability_uuid
@@ -104,17 +105,7 @@ _ONBOARDING_NEXT_STEPS = {
 # ---------------------------------------------------------------------------
 
 _DOMAIN_TOOLS = [
-    # Domain-specific free
-    ToolIdentity(
-        capability="begin_oauth",
-        category="free",
-        intent="Start OAuth2 browser flow to connect a Schwab brokerage account.",
-    ),
-    ToolIdentity(
-        capability="check_oauth_status",
-        category="free",
-        intent="Check whether the Schwab OAuth authorization flow has completed.",
-    ),
+    # OAuth tools are now standard (from wheel via OAuthProviderConfig)
     # Paid — write tier (brokerage reads)
     ToolIdentity(
         capability="get_brokerage_positions",
@@ -204,6 +195,22 @@ def _get_settings():
     return _settings
 
 
+async def _on_schwab_token(npub: str, token: dict) -> dict:
+    """Post-token callback: fetch Schwab account hash."""
+    import httpx
+    access_token = token.get("access_token", "")
+    async with httpx.AsyncClient() as http:
+        resp = await http.get(
+            "https://api.schwabapi.com/trader/v1/accounts/accountNumbers",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        resp.raise_for_status()
+        accounts = resp.json()
+    if not accounts:
+        raise ValueError("No accounts found for this Schwab user.")
+    return {"account_hash": accounts[0]["hashValue"]}
+
+
 # ---------------------------------------------------------------------------
 # OperatorRuntime — replaces all DPYC boilerplate
 # ---------------------------------------------------------------------------
@@ -250,7 +257,14 @@ runtime = OperatorRuntime(
         },
         description="Operator credentials for BTCPay Lightning payments and Schwab API access",
     ),
-    # No patron_credential_template — Schwab uses OAuth2 browser dance
+    oauth_provider=OAuthProviderConfig(
+        authorize_url="https://api.schwabapi.com/v1/oauth/authorize",
+        token_url="https://api.schwabapi.com/v1/oauth/token",
+        scopes="readonly",
+        pkce=False,
+        on_token_received=_on_schwab_token,
+        service_name="schwab",
+    ),
     operator_credential_greeting=(
         "Hi — I'm Schwab MCP, a Tollbooth service for read-only Schwab "
         "brokerage data. To come online, I need your BTCPay Server "
@@ -328,19 +342,6 @@ async def _ensure_operator_credentials() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-
-
-async def _get_redirect_uri() -> str:
-    """Return the OAuth redirect URI from the DPYC registry."""
-    from tollbooth import resolve_service_by_name
-
-    try:
-        svc = await resolve_service_by_name("tollbooth-oauth2-callback")
-        return svc["url"]
-    except Exception as exc:
-        raise RuntimeError(
-            f"Failed to resolve OAuth2 callback from registry: {exc}"
-        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -451,143 +452,9 @@ async def _require_session(npub: str):
 
 
 # ---------------------------------------------------------------------------
-# OAuth collector helper
-# ---------------------------------------------------------------------------
-
-
-async def _check_oauth_via_collector(session_key: str, patron_npub: str) -> dict[str, Any]:
-    """Poll the external OAuth2 collector for the auth code, then activate session."""
-    from oauth_flow import (
-        exchange_code_for_token,
-        fetch_account_hash,
-        retrieve_code_from_collector,
-    )
-
-    try:
-        from tollbooth.registry import resolve_service_by_name
-
-        settings = _get_settings()
-        svc = await resolve_service_by_name(
-            "tollbooth-oauth2-collector",
-            cache_ttl_seconds=settings.dpyc_registry_cache_ttl_seconds,
-        )
-        collector_url = svc["url"].rstrip("/")
-    except Exception as e:
-        return {"success": False, "error": f"Failed to resolve OAuth2 collector: {e}"}
-
-    code = await retrieve_code_from_collector(collector_url, patron_npub)
-    if code is None:
-        return {
-            "status": "pending",
-            "message": "Waiting for browser authorization. Open the URL from begin_oauth.",
-        }
-
-    # Exchange code for token
-    try:
-        op_creds = await _ensure_operator_credentials()
-    except ValueError as e:
-        return {"success": False, "error": str(e)}
-
-    redirect_uri = await _get_redirect_uri()
-
-    try:
-        token = await exchange_code_for_token(
-            code=code,
-            client_id=op_creds["client_id"],
-            client_secret=op_creds["client_secret"],
-            redirect_uri=redirect_uri,
-        )
-        account_hash = await fetch_account_hash(token["access_token"])
-    except Exception as exc:
-        return {"status": "failed", "error": str(exc)}
-
-    # Activate session
-    import json
-
-    from vault import _create_client, set_session
-
-    settings = _get_settings()
-    token_json = json.dumps(token)
-    client = _create_client(
-        op_creds["client_id"],
-        op_creds["client_secret"],
-        token_json,
-        api_base=settings.schwab_trader_api,
-    )
-    set_session(session_key, token_json, account_hash, client, npub=patron_npub)
-
-    # Persist to vault for cross-restart restoration
-    await runtime.store_patron_session(patron_npub, {
-        "token_json": token_json,
-        "account_hash": account_hash,
-    }, service=PATRON_CREDENTIAL_SERVICE)
-
-    return {"status": "completed", "message": "Session activated successfully."}
-
-
-# ---------------------------------------------------------------------------
-# MCP Tools — OAuth Flow (Free, domain-specific)
-# ---------------------------------------------------------------------------
-
-
-@tool
-async def begin_oauth(npub: str) -> dict[str, Any]:
-    """Start the OAuth2 authorization flow to link your Schwab account.
-
-    Returns an authorization URL — open it in your browser to log in
-    to Schwab and authorize. After authorizing, call check_oauth_status
-    with the same npub to confirm your session is active.
-
-    Args:
-        npub: Your DPYC patron Nostr public key (npub1...).
-    """
-    try:
-        op_creds = await _ensure_operator_credentials()
-    except ValueError as e:
-        return {"success": False, "error": str(e)}
-
-    try:
-        redirect_uri = await _get_redirect_uri()
-    except RuntimeError as e:
-        return {"success": False, "error": str(e)}
-
-    from oauth_flow import begin_oauth_flow
-
-    result = begin_oauth_flow(
-        patron_npub=npub,
-        client_id=op_creds["client_id"],
-        redirect_uri=redirect_uri,
-    )
-
-    # Shorten the authorize URL via tollbooth-shortlinks (best-effort)
-    if "authorize_url" in result:
-        from tollbooth.shortlinks import create_shortlink as _create_shortlink
-
-        short = await _create_shortlink(result["authorize_url"])
-        if short:
-            result["authorize_url_short"] = short
-
-    return result
-
-
-@tool
-async def check_oauth_status(npub: str) -> dict[str, Any]:
-    """Check whether your OAuth authorization flow has completed.
-
-    Call this after opening the authorization URL from begin_oauth
-    and completing the Schwab login in your browser.
-
-    Args:
-        npub: The same DPYC patron npub used in begin_oauth.
-    """
-    if not npub or not npub.startswith("npub1"):
-        return {"success": False, "error": "npub is required."}
-
-    return await _check_oauth_via_collector(npub, npub)
-
-
-# ---------------------------------------------------------------------------
 # MCP Tools — Paid (Schwab brokerage data, domain-specific)
+# OAuth tools (begin_oauth, check_oauth_status) are now standard
+# wheel tools, registered via OAuthProviderConfig.
 # ---------------------------------------------------------------------------
 
 
