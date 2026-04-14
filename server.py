@@ -619,7 +619,9 @@ async def get_brokerage_balances(npub: NpubField = "", proof: str = "") -> str |
 
 @tool
 @runtime.paid_tool(capability_uuid("get_stock_quote"), catch_errors=True)
-async def get_stock_quote(symbols: str, npub: NpubField = "", proof: str = "") -> str | dict[str, Any]:
+async def get_stock_quote(
+    symbols: str, npub: NpubField = "", proof: str = "",
+) -> str | dict[str, Any]:
     """Get real-time quotes for one or more symbols.
     Args:
         symbols: Comma-separated ticker symbols (e.g. "AAPL,MSFT,TSLA").
@@ -777,7 +779,9 @@ async def get_brokerage_orders(
 
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_order"), catch_errors=True)
-async def get_brokerage_order(order_id: str, npub: NpubField = "", proof: str = "") -> str | dict[str, Any]:
+async def get_brokerage_order(
+    order_id: str, npub: NpubField = "", proof: str = "",
+) -> str | dict[str, Any]:
     """Get details for a single order by ID.
     Args:
         order_id: The Schwab order ID.
