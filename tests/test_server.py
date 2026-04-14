@@ -24,13 +24,14 @@ class TestRequireSession:
     @pytest.mark.asyncio
     async def test_returns_session_when_present(self):
         """_require_session returns the active session."""
+        npub = "npub1test" + "0" * 51
         session = _make_mock_session()
         with patch("vault.get_session", return_value=session) as mock_get:
             from server import _require_session
 
-            result = await _require_session("npub1testuser0000000000000000000000000000000000000000000000000")
+            result = await _require_session(npub)
             assert result is session
-            mock_get.assert_called_once_with("npub1testuser0000000000000000000000000000000000000000000000000")
+            mock_get.assert_called_once_with(npub)
 
     @pytest.mark.asyncio
     async def test_raises_when_no_session(self):
