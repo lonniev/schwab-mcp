@@ -28,18 +28,17 @@ class TestRequireSession:
         with patch("vault.get_session", return_value=session) as mock_get:
             from server import _require_session
 
-            result = await _require_session("user-1")
+            result = await _require_session("npub1testuser0000000000000000000000000000000000000000000000000")
             assert result is session
-            mock_get.assert_called_once_with("user-1")
+            mock_get.assert_called_once_with("npub1testuser0000000000000000000000000000000000000000000000000")
 
     @pytest.mark.asyncio
     async def test_raises_when_no_session(self):
-        """_require_session raises ValueError when no session exists."""
-        with patch("vault.get_session", return_value=None):
-            from server import _require_session
+        """_require_session raises ValueError when no npub provided."""
+        from server import _require_session
 
-            with pytest.raises(ValueError, match="No Schwab credentials are stored"):
-                await _require_session("user-1")
+        with pytest.raises(ValueError, match="npub is required"):
+            await _require_session("")
 
 
 class TestToolRegistry:
