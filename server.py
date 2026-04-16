@@ -264,6 +264,8 @@ runtime = OperatorRuntime(
         pkce=False,
         on_token_received=_on_schwab_token,
         service_name="schwab",
+        client_id_field="app_key",
+        client_secret_field="secret",
     ),
     operator_credential_greeting=(
         "Hi — I'm Schwab MCP, a Tollbooth service for read-only Schwab "
