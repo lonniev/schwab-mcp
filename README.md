@@ -292,13 +292,25 @@ Patron identity is established via the OAuth2 flow (`begin_oauth` / `check_oauth
 
 ### Operator Environment Variables
 
-The Operator configures these on the cloud host (e.g., FastMCP Cloud environment settings). See [`.env.example`](.env.example) for the full list.
+#### Required
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `SCHWAB_TRADER_API` | No | API base URL (default `https://api.schwabapi.com`) |
-| `TOLLBOOTH_NOSTR_OPERATOR_NSEC` | Yes | Nostr signing key for Secure Courier |
-| `NEON_DATABASE_URL` | Yes | Postgres for NeonVault (ledger + credential persistence) |
+| Variable | Description |
+|----------|-------------|
+| `TOLLBOOTH_NOSTR_OPERATOR_NSEC` | Operator's Nostr secret key -- the single bootstrap key for identity, Secure Courier DMs, and audit signing |
+
+This is the only env var required to start. Certified operators bootstrap their Neon database URL from the Authority via encrypted Nostr DM -- `NEON_DATABASE_URL` is not read from the environment.
+
+#### Optional Tuning
+
+| Variable | Description |
+|----------|-------------|
+| `TOLLBOOTH_NOSTR_RELAYS` | Comma-separated relay URLs (overrides defaults) |
+| `SCHWAB_TRADER_API` | API base URL (default `https://api.schwabapi.com`) |
+| `CREDIT_TTL_SECONDS` | Tranche lifetime in seconds (default: 604800 = 7 days) |
+| `DPYC_REGISTRY_CACHE_TTL_SECONDS` | How long to cache the DPYC community registry (default: 300) |
+| `CONSTRAINTS_ENABLED` | `"true"` to enable constraint engine evaluation on tool calls |
+
+#### Credentials via Secure Courier (NOT env vars)
 
 BTCPay credentials (`btcpay_host`, `btcpay_api_key`, `btcpay_store_id`) and Schwab API credentials (`app_key`, `secret`) are delivered exclusively through Secure Courier (`service="schwab-operator"`), validated at receive time, and stored in the encrypted vault. No secrets in env vars or chat.
 
