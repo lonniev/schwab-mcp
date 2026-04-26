@@ -359,23 +359,19 @@ async def _restore_session_from_vault(
 ) -> tuple[Any, str]:
     """Attempt to restore a patron session from the encrypted vault.
 
+    Delegates token loading and refresh to the wheel's generic
+    ``restore_oauth_session`` — which handles expiration checking,
+    token refresh via the provider, and persistence of rotated tokens.
+
     Returns (session, "") on success, or (None, situation) describing
-    which lifecycle state the system is in. These are expected states,
-    not errors — each has a clear next action.
+    which lifecycle state the system is in.
     """
-    # Stage 1: Can we reach the vault?
-    try:
-        creds = await runtime.load_patron_session(
-            patron_npub, service=PATRON_CREDENTIAL_SERVICE,
-        )
-    except Exception:
-        return None, "vault_bootstrapping"
+    # Stage 1: restore (and refresh if needed) via the wheel
+    creds, situation = await runtime.restore_oauth_session(patron_npub)
+    if creds is None:
+        return None, situation
 
-    # Stage 2: Does this patron have stored credentials?
-    if not creds or "token_json" not in creds:
-        return None, "no_credentials"
-
-    # Stage 3: Can we build a live Schwab client from stored credentials?
+    # Stage 2: Can we build a live Schwab client?
     try:
         op_creds = await _ensure_operator_credentials()
     except Exception:
@@ -384,6 +380,7 @@ async def _restore_session_from_vault(
     try:
         settings = _get_settings()
         from vault import _create_client, set_session
+
         client = _create_client(
             op_creds["client_id"],
             op_creds["client_secret"],
