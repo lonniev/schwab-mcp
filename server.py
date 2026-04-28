@@ -45,17 +45,13 @@ mcp = FastMCP(
         '   - Reply with JSON: `{"app_key": "...", "secret": "..."}`\n'
         "   - Call `receive_credentials(sender_npub=<operator_npub>, "
         'service="schwab-operator")`\n\n'
-        "3. **Patron onboarding** (per-user) — choose one:\n\n"
-        "   **Option A — OAuth (recommended):**\n"
+        "3. **Patron onboarding** (per-user):\n"
         "   - Call `begin_oauth(npub=<your_npub>)` to get an authorization URL\n"
         "   - Open the URL in your browser and log in to Schwab\n"
-        "   - Call `check_oauth_status(npub=<your_npub>)` to confirm session activation\n\n"
-        "   **Option B — Manual Secure Courier:**\n"
-        "   - Get your **patron npub** from the dpyc-oracle's how_to_join() tool\n"
-        "   - Call `request_credential_channel(recipient_npub=<patron_npub>)` "
-        "to receive a welcome DM\n"
-        '   - Reply with JSON: `{"token_json": "...", "account_hash": "..."}`\n'
-        "   - Call `receive_credentials(sender_npub=<patron_npub>)` to vault your credentials\n\n"
+        "   - Call `check_oauth_status(npub=<your_npub>)` to confirm session activation\n"
+        "   - Call `get_account_numbers(npub=<your_npub>)` to see your accounts\n"
+        "   - Call `update_patron_credential(npub=<your_npub>, "
+        'field="account_hash", value=<hash>)` to set your preferred account\n\n'
         "## Credits Model\n\n"
         "Tool calls are priced dynamically via the operator's pricing model. "
         "Use `check_balance` to see your balance and `check_price` to preview "
@@ -72,7 +68,7 @@ tool = make_slug_tool(mcp, "schwab")
 # ---------------------------------------------------------------------------
 
 _ONBOARDING_NEXT_STEPS = {
-    "action": "secure_courier_onboarding",
+    "action": "oauth_onboarding",
     "operator_setup": (
         "The operator must first deliver Schwab API app credentials via "
         'Secure Courier (service="schwab-operator"): '
@@ -85,18 +81,16 @@ _ONBOARDING_NEXT_STEPS = {
         "how_to_join() tool."
     ),
     "step_2": (
-        "Call request_credential_channel(recipient_npub=<npub>) to send "
-        "a welcome DM to the user's Nostr client."
+        "Call begin_oauth(npub=<npub>) to get an authorization URL. "
+        "The user opens it in their browser and logs in to Schwab."
     ),
     "step_3": (
-        "Tell the user to open their Nostr client (Primal, Damus, etc.) "
-        "and reply to the welcome DM with their Schwab credentials in "
-        "the format shown. Credentials must NEVER appear in this chat."
+        "Call check_oauth_status(npub=<npub>) to confirm authorization. "
+        "Then call get_account_numbers(npub=<npub>) to list accounts."
     ),
     "step_4": (
-        "Once the user confirms they replied, call "
-        "receive_credentials(sender_npub=<npub>) to vault the "
-        "credentials for future sessions."
+        "Call update_patron_credential(npub=<npub>, "
+        'field="account_hash", value=<hash>) to set the preferred account.'
     ),
 }
 
@@ -106,6 +100,12 @@ _ONBOARDING_NEXT_STEPS = {
 
 _DOMAIN_TOOLS = [
     # OAuth tools are now standard (from wheel via OAuthProviderConfig)
+    # Free — account discovery (no account_hash needed)
+    ToolIdentity(
+        capability="get_account_numbers",
+        category="free",
+        intent="List Schwab account numbers and hash identifiers.",
+    ),
     # Paid — write tier (brokerage reads)
     ToolIdentity(
         capability="get_brokerage_positions",
@@ -195,20 +195,6 @@ def _get_settings():
     return _settings
 
 
-async def _on_schwab_token(npub: str, token: dict) -> dict:
-    """Post-token callback: fetch Schwab account hash."""
-    import httpx
-    access_token = token.get("access_token", "")
-    async with httpx.AsyncClient() as http:
-        resp = await http.get(
-            "https://api.schwabapi.com/trader/v1/accounts/accountNumbers",
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        resp.raise_for_status()
-        accounts = resp.json()
-    if not accounts:
-        raise ValueError("No accounts found for this Schwab user.")
-    return {"account_hash": accounts[0]["hashValue"]}
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +248,6 @@ runtime = OperatorRuntime(
         token_url="https://api.schwabapi.com/v1/oauth/token",
         scopes="",
         pkce=False,
-        on_token_received=_on_schwab_token,
         service_name="schwab",
         client_id_field="app_key",
         client_secret_field="secret",
@@ -371,7 +356,12 @@ async def _restore_session_from_vault(
     if creds is None:
         return None, situation
 
-    # Stage 2: Can we build a live Schwab client?
+    # Stage 2: Does the patron have an account_hash set?
+    account_hash = creds.get("account_hash", "")
+    if not account_hash:
+        return None, "no_account_hash"
+
+    # Stage 3: Can we build a live Schwab client?
     try:
         op_creds = await _ensure_operator_credentials()
     except Exception:
@@ -390,7 +380,7 @@ async def _restore_session_from_vault(
         session = set_session(
             session_key,
             creds["token_json"],
-            creds.get("account_hash", ""),
+            account_hash,
             client,
             npub=patron_npub,
         )
@@ -428,6 +418,13 @@ _SESSION_GUIDANCE: dict[str, str] = {
         "secure browser-based authorization. Your credentials will be "
         "encrypted and stored so future sessions restore automatically."
     ),
+    "no_account_hash": (
+        "Your Schwab OAuth session is active but no account has been "
+        "selected yet. "
+        "Action: call get_account_numbers to see your accounts, then "
+        'call update_patron_credential(field="account_hash", value=<hash>) '
+        "to set your preferred account."
+    ),
 }
 
 
@@ -455,6 +452,58 @@ async def _require_session(npub: str):
 # OAuth tools (begin_oauth, check_oauth_status) are now standard
 # wheel tools, registered via OAuthProviderConfig.
 # ---------------------------------------------------------------------------
+
+
+@tool
+async def get_account_numbers(npub: NpubField = "", proof: str = "") -> str | dict[str, Any]:
+    """List Schwab account numbers and their hash identifiers.
+
+    Call after completing OAuth. Returns accounts with hash values
+    needed for brokerage data tools. Then call
+    ``update_patron_credential(field="account_hash", value=<hash>)``
+    to set your preferred account. Free.
+
+    Args:
+        npub: Your DPYC patron Nostr public key (npub1...).
+    """
+    if not npub or not npub.startswith("npub1"):
+        return {"success": False, "error": "npub is required."}
+
+    # Need OAuth tokens but NOT account_hash
+    creds, situation = await runtime.restore_oauth_session(npub)
+    if creds is None:
+        guidance = _SESSION_GUIDANCE.get(situation, _SESSION_GUIDANCE["no_credentials"])
+        return {"success": False, "error": guidance}
+
+    access_token = creds.get("access_token", "")
+    if not access_token:
+        return {"success": False, "error": _SESSION_GUIDANCE["no_credentials"]}
+
+    import httpx
+    async with httpx.AsyncClient() as http:
+        settings = _get_settings()
+        resp = await http.get(
+            f"{settings.schwab_trader_api}/trader/v1/accounts/accountNumbers",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        resp.raise_for_status()
+        accounts = resp.json()
+
+    if not accounts:
+        return {"success": False, "error": "No accounts found for this Schwab user."}
+
+    return {
+        "success": True,
+        "accounts": [
+            {"account_number": a["accountNumber"], "account_hash": a["hashValue"]}
+            for a in accounts
+        ],
+        "message": (
+            "Call update_patron_credential(npub=<your_npub>, "
+            'field="account_hash", value=<hash>) to set your '
+            "preferred account for brokerage data tools."
+        ),
+    }
 
 
 @tool
