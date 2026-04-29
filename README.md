@@ -96,6 +96,7 @@ All paid tools require `npub` and `proof` parameters for identity verification.
 | `account_statement` | View account statement summary |
 | `request_npub_proof` | Request a kind-27235 Schnorr proof via Secure Courier |
 | `receive_npub_proof` | Pick up a completed proof from the vault |
+| `get_account_numbers` | List linked Schwab account numbers and hashes |
 
 All brokerage tools are read-only. No orders are placed.
 
@@ -203,22 +204,13 @@ Your balance depletes as you call paid tools. Recharge anytime with another `pur
 
 You need to authorize schwab-mcp to read your Schwab account. Choose one method:
 
-**Option A -- OAuth2 Flow (recommended):**
+### Patron Onboarding
 
-1. Call `begin_oauth(patron_npub=<your_npub>)` -- returns `authorize_url` (the primary link to open in your browser) and `authorize_url_short` (a display-only shortened link -- do not use it for the browser redirect, as URL shorteners may truncate query parameters)
-2. Open the `authorize_url` in your browser and log in to Schwab. There is no `scope` parameter -- Schwab does not use OAuth scopes
-3. Schwab redirects back to the collector -- token exchange happens automatically
-4. Call `check_oauth_status(patron_npub=<your_npub>)` to confirm your session is active
-
-No curl commands, no copy-paste. Your credentials never appear in the chat. Sessions are keyed by your npub and persist across server restarts via the encrypted vault.
-
-**Option B -- Manual Secure Courier (fallback):**
-
-If the OAuth redirect is unreachable (e.g., firewalled local dev), you can deliver credentials manually via encrypted Nostr DM. See the [tollbooth-oauth2-collector](https://github.com/lonniev/tollbooth-oauth2-collector) companion repo for full instructions on generating `token_json` + `account_hash`, then:
-
-1. Call `request_credential_channel(recipient_npub=<your_npub>)` -- a welcome DM arrives in Oxcart
-2. Reply with: `{"token_json": "<full token JSON>", "account_hash": "<hashValue>"}`
-3. Call `receive_credentials(sender_npub=<your_npub>)` -- session activates
+1. Call `begin_oauth(npub=<your_npub>)` to get an authorization URL
+2. Open the URL in your browser and log in to Schwab
+3. Call `check_oauth_status(npub=<your_npub>)` to confirm session activation
+4. Call `get_account_numbers(npub=<your_npub>)` to list your accounts and hashes
+5. Call `update_patron_credential(npub=<your_npub>, field="account_hash", value=<hash>)` to set your preferred account
 
 ### 9. Using Schwab Tools in Conversation
 
