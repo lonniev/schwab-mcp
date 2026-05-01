@@ -27,12 +27,14 @@ subscription nag screens, and KYC friction.
    (`npub`), not an email or password. One keypair per role, managed by the
    user. No account creation forms.
 
-3. **kind-27235 Schnorr proof** -- Every paid tool call requires a `proof`
-   parameter carrying a cryptographic signature that binds the caller to their
-   `npub`. Proofs are generated via a **human-in-the-loop** Secure Courier
-   exchange: the patron consciously approves each proof request in their
-   Nostr client. The proof cache expires after approximately one hour; renew
-   with a fresh `request_npub_proof` / `receive_npub_proof` cycle.
+3. **Poison-keyed proof** -- Every paid tool call requires a `proof`
+   parameter carrying a poison phrase (e.g., `bold-hawk-42`) returned by
+   `request_npub_proof` / `receive_npub_proof`. The calling application
+   remembers this token and passes it on every subsequent call. The MCP
+   stores only `sha256(poison):npub` in the vault -- never the raw phrase.
+   Proofs are generated via a **human-in-the-loop** Secure Courier exchange:
+   the patron consciously approves each proof request in their Nostr client.
+   Duration is patron-chosen (up to 7 days). Proofs survive MCP restarts.
 
 4. **UUID-keyed tool identity** -- Every tool is a `ToolIdentity` object with
    a deterministic UUID v5 derived from a capability name. Pricing hints come
@@ -83,20 +85,33 @@ All paid tools require `npub` and `proof` parameters for identity verification.
 
 | Tool | Description |
 |------|-------------|
-| `session_status` | Check current session and DPYC&trade; identity state |
+| `session_status` | Check operator lifecycle state and readiness |
+| `service_status` | Check health and configuration of this service |
 | `begin_oauth` | Start OAuth2 flow -- returns Schwab authorization URL |
 | `check_oauth_status` | Poll whether OAuth flow completed and session is active |
+| `get_account_numbers` | List linked Schwab account numbers and hashes |
 | `request_credential_channel` | Open a Secure Courier channel for credential delivery via Nostr DM |
 | `receive_credentials` | Pick up credentials from the encrypted vault |
 | `forget_credentials` | Delete vaulted credentials for re-delivery |
+| `update_patron_credential` | Add or update a single patron credential field |
+| `delete_patron_credential` | Remove a single patron credential field |
+| `get_patron_credential_fields` | List stored patron credential field names |
 | `check_balance` | View credit balance and usage |
 | `check_price` | Preview tool cost before calling |
 | `purchase_credits` | Create a Lightning invoice to buy credits |
 | `check_payment` | Verify Lightning payment and credit the balance |
+| `restore_credits` | Restore credits from a previously paid invoice |
 | `account_statement` | View account statement summary |
-| `request_npub_proof` | Request a kind-27235 Schnorr proof via Secure Courier |
-| `receive_npub_proof` | Pick up a completed proof from the vault |
-| `get_account_numbers` | List linked Schwab account numbers and hashes |
+| `account_statement_infographic` | Visual SVG infographic of account (1 sat) |
+| `check_authority_balance` | Check operator's cert-sat balance at Authority |
+| `get_pricing_model` | View the active pricing model |
+| `list_constraint_types` | List available constraint types and schemas |
+| `request_npub_proof` | Request poison-keyed ownership proof via Nostr DM |
+| `receive_npub_proof` | Receive and cache proof; returns proof_token |
+| `get_operator_onboarding_status` | Report operator configuration readiness |
+| `get_patron_onboarding_status` | Report patron credential readiness |
+| `list_notarizations` | List recent Bitcoin notarization records |
+| `get_notarization_proof` | Generate a Merkle inclusion proof for a patron balance |
 
 All brokerage tools are read-only. No orders are placed.
 
@@ -107,7 +122,7 @@ All brokerage tools are read-only. No orders are placed.
 - **Tollbooth DPYC&trade;**: pre-funded Lightning balances, Authority-certified purchase orders, NeonVault (Postgres) for ledger persistence
 - **Registry discovery**: OAuth2 collector URL resolved from DPYC&trade; registry at runtime (no `OAUTH_COLLECTOR_URL` env var needed)
 - **Credential validation**: operator credentials are validated at receive time -- `btcpay_host`, `app_key`, and `secret` must all be present before vaulting
-- **Proof-based identity**: all paid tools require a `proof` parameter (kind-27235 Schnorr signature) for cryptographic identity verification alongside `npub`
+- **Poison-keyed proof**: all paid tools require a `proof` parameter -- a poison phrase from `request_npub_proof` / `receive_npub_proof` that the calling application remembers. The MCP stores only the hash. Survives restarts; patron-chosen TTL up to 7 days. Restricted tools (operator-only) still use kind-27235 Schnorr signatures.
 
 ---
 
@@ -188,7 +203,7 @@ The Secure Courier is a **human-in-the-loop** exchange: the operator consciously
    ```
 3. Call `receive_credentials(sender_npub=<operator_npub>, service="schwab-operator")` -- credentials are validated (`btcpay_host`, `app_key`, and `secret` must all be present) and vaulted
 
-This is a one-time setup per deployment. Credentials are stored as `token_json` in the encrypted NeonVault and persist across server restarts.
+This is a one-time setup per deployment. Operator credentials are encrypted and stored in the NeonVault, persisting across server restarts.
 
 ### 7. For Patrons -- Buy Credits (api_sats)
 
@@ -245,7 +260,7 @@ Free tools are always available:
 
 **Cold start / first tool call fails:** The FastMCP Cloud runtime may cold-start on the first request. Retry the tool call inline -- the server warms up within a few seconds and the second call succeeds.
 
-**"proof is required":** Call `request_npub_proof` followed by `receive_npub_proof` to prove npub ownership. The proof cache expires after approximately one hour; renew with a fresh request/receive cycle.
+**"proof is required":** Call `request_npub_proof` followed by `receive_npub_proof` to prove npub ownership. The response includes a `proof_token` -- pass it as the `proof` parameter on every subsequent paid tool call. Duration is patron-chosen (up to 7 days). The proof survives MCP restarts.
 
 **"Insufficient credit balance":** Call `purchase_credits` to top up. Use `check_balance` to see your current api_sats balance and `tranche_lifetime` expiry.
 
@@ -253,7 +268,7 @@ Free tools are always available:
 
 **Credential lifecycle states:** Credentials move through `pending` (channel opened) -> `delivered` (DM sent by human) -> `vaulted` (picked up and validated). If `receive_credentials` returns a lifecycle state instead of success, it is not an error -- it is telling you where in the flow you are. Follow the guidance in the response.
 
-**OAuth token stored in vault:** After a successful OAuth2 flow, the `token_json` is persisted in NeonVault. Sessions survive server restarts. If the Schwab token expires (30-minute access, 7-day refresh), the `SchwabClient` refreshes proactively. If the refresh token itself expires, the patron must re-run `begin_oauth`.
+**OAuth token stored in vault:** After a successful OAuth2 flow, the `token_json` is persisted in NeonVault. Sessions survive server restarts via the wheel's `restore_oauth_session` -- which detects expiration, refreshes the token via the provider, and persists the rotated pair back to vault. If the refresh token itself expires (Schwab: 7 days), the patron must re-run `begin_oauth`.
 
 ---
 
@@ -298,9 +313,8 @@ This is the only env var required to start. Certified operators bootstrap their 
 |----------|-------------|
 | `TOLLBOOTH_NOSTR_RELAYS` | Comma-separated relay URLs (overrides defaults) |
 | `SCHWAB_TRADER_API` | API base URL (default `https://api.schwabapi.com`) |
-| `CREDIT_TTL_SECONDS` | Tranche lifetime in seconds (default: 604800 = 7 days) |
+| `CREDIT_TTL_SECONDS` | Fallback tranche lifetime in seconds (default: 604800 = 7 days). Overridden by `tranche_lifetime.ttl_days` in the pricing model if set. |
 | `DPYC_REGISTRY_CACHE_TTL_SECONDS` | How long to cache the DPYC community registry (default: 300) |
-| `CONSTRAINTS_ENABLED` | `"true"` to enable constraint engine evaluation on tool calls |
 
 #### Credentials via Secure Courier (NOT env vars)
 
