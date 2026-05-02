@@ -2,6 +2,24 @@
 
 ![Open Positions — Options Risk Profile](assets/hero-banner.png)
 
+**Your brokerage data, conversationally.** Ask your AI assistant about your positions, screen option spreads, audit today's trades against your strategy rules, and get end-of-day reports — all from natural language. The data cost? About 6 sats per session (~$0.005).
+
+## Why This Exists
+
+The data in schwab-mcp is nothing you can't get from ThinkOrSwim, OptionAlpha, or Schwab's own web UI. What you *can't* get from those tools is a **personal trading assistant** that blends:
+
+- Your live positions and account balances
+- Real-time option chains with Greeks, IV, and OTM%
+- Your trading strategy rules (credit floors, RWR targets, sector concentration limits)
+- Market context (earnings calendars, VIX levels, sector rotation)
+- All of the above in a single conversational turn
+
+Ask *"How would you judge my new trades for the day?"* and get a structured audit against your criteria. Ask *"What are three SPS candidates aligned with my strategy and balanced with my current book?"* and get sector-aware, earnings-aware, IV-aware suggestions — grounded in your actual positions, not generic advice.
+
+The AI does the synthesis. schwab-mcp provides the data bridge. You pay per-call in Bitcoin Lightning sats — no subscription, no KYC, no vendor lock-in. A full day of morning report + evening report + follow-up analysis costs about **6 sats** (< $0.01).
+
+---
+
 Multi-tenant [MCP](https://modelcontextprotocol.io/) server exposing Charles Schwab brokerage data to AI agents via [FastMCP](https://github.com/jlowin/fastmcp). Monetized via [Tollbooth DPYC](https://github.com/lonniev/tollbooth-dpyc)&trade; Lightning micropayments. Serves over **Streamable HTTP** with direct async httpx calls to `api.schwabapi.com`.
 
 > Don't Pester Your Customer&trade; (DPYC&trade;) &mdash; API monetization for Entrepreneurial Bitcoin Advocates
