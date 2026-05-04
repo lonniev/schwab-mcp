@@ -394,8 +394,7 @@ async def _restore_session_from_vault(
 _SESSION_GUIDANCE: dict[str, str] = {
     "vault_bootstrapping": (
         "The server is establishing its encrypted connection to the "
-        "credential vault. This happens once after a cold start and "
-        "typically completes within 10-15 seconds. "
+        "credential vault. This happens once after a cold start. "
         "Action: repeat your request shortly — no re-authentication needed."
     ),
     "operator_not_configured": (
@@ -407,7 +406,8 @@ _SESSION_GUIDANCE: dict[str, str] = {
     ),
     "token_expired": (
         "Your Schwab OAuth session was found in the vault but the access "
-        "token could not be used — Schwab limits tokens to 7 days. "
+        "token can no longer be refreshed — Schwab refresh tokens have a "
+        "finite lifetime set by the upstream provider. "
         "Action: call begin_oauth to complete a new Schwab authorization. "
         "This is a one-time browser sign-in that refreshes your access."
     ),
