@@ -339,50 +339,12 @@ async def _ensure_operator_credentials() -> dict[str, str]:
 # Session identity is now npub-only — no Horizon user_id mapping needed.
 
 
-# Map each lifecycle situation to a structured error_code + next_steps
-# the caller can act on. The proof/oauth split here is what lets calling
-# agents route directly to the right recovery flow without parsing prose.
-_OAUTH_RECOVERY_STEPS = [
-    "schwab_begin_oauth(npub=<patron_npub>)",
-    "Open the authorize_url, log in, click Allow",
-    "schwab_check_oauth_status(npub=<patron_npub>) promptly after Allow",
-]
-
-_SITUATION_RESOLUTION: dict[str, dict[str, Any]] = {
-    "vault_bootstrapping": {
-        "error_code": "warming_up",
-        "error": (
-            "The server is establishing its encrypted connection to the "
-            "credential vault. This happens once after a cold start."
-        ),
-        "next_steps": ["Repeat your request shortly — no re-authentication needed."],
-    },
-    "operator_not_configured": {
-        "error_code": "operator_not_configured",
-        "error": (
-            "The operator's Schwab API application credentials have not been "
-            "delivered yet. This is an operator setup step, not a patron action."
-        ),
-        "next_steps": ["Contact the operator", "Try again later"],
-    },
-    "no_oauth_config": {
-        "error_code": "operator_not_configured",
-        "error": "OAuth provider is not configured on this operator.",
-        "next_steps": ["Contact the operator"],
-    },
-    "token_expired": {
-        "error_code": "oauth_refresh_needed",
-        "error": (
-            "Schwab refresh token has expired or been revoked. A new browser "
-            "authorization is needed. This is routine when refresh tokens age out."
-        ),
-        "next_steps": _OAUTH_RECOVERY_STEPS,
-    },
-    "no_credentials": {
-        "error_code": "oauth_refresh_needed",
-        "error": "No Schwab credentials are stored for your identity. This is expected on first use.",
-        "next_steps": _OAUTH_RECOVERY_STEPS,
-    },
+# Schwab-specific situations that the SDK helper doesn't know about.
+# Standard situations (token_expired, no_credentials, vault_bootstrapping,
+# operator_not_configured, no_oauth_config) are handled by
+# runtime.oauth_situation_response — defined once in the wheel and shared
+# across all OAuth2 operators.
+_SCHWAB_SITUATIONS: dict[str, dict[str, Any]] = {
     "no_account_hash": {
         "error_code": "account_hash_required",
         "error": "Your Schwab OAuth session is active but no account has been selected yet.",
@@ -400,9 +362,15 @@ _SITUATION_RESOLUTION: dict[str, dict[str, Any]] = {
 
 
 def _resolution_for(situation: str) -> dict[str, Any]:
-    """Build a structured error response for a session-restoration situation."""
-    spec = _SITUATION_RESOLUTION.get(situation) or _SITUATION_RESOLUTION["no_credentials"]
-    return {"success": False, **spec}
+    """Build a structured error response for a session-restoration situation.
+
+    Schwab-specific situations (account_hash_required, npub_missing) are
+    handled inline; everything else delegates to the wheel's standard
+    OAuth situation mapping.
+    """
+    if situation in _SCHWAB_SITUATIONS:
+        return {"success": False, **_SCHWAB_SITUATIONS[situation]}
+    return runtime.oauth_situation_response(situation)
 
 
 async def _require_session(npub: str):
