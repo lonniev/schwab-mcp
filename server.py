@@ -339,11 +339,12 @@ async def _ensure_operator_credentials() -> dict[str, str]:
 # Session identity is now npub-only — no Horizon user_id mapping needed.
 
 
-# Schwab-specific situations that the SDK helper doesn't know about.
-# Standard situations (token_expired, no_credentials, vault_bootstrapping,
-# operator_not_configured, no_oauth_config) are handled by
-# runtime.oauth_situation_response — defined once in the wheel and shared
-# across all OAuth2 operators.
+# Schwab's only operator-specific situation: the patron has authorized
+# OAuth but has not yet selected an account_hash for brokerage calls.
+# Everything else (token_expired, no_credentials, vault_bootstrapping,
+# operator_not_configured, no_oauth_config, *unknown*) is delegated to
+# runtime.oauth_situation_response — one canonical mapping in the wheel.
+# npub validation also lives in the wheel via runtime.npub_validation_error.
 _SCHWAB_SITUATIONS: dict[str, dict[str, Any]] = {
     "no_account_hash": {
         "error_code": "account_hash_required",
@@ -353,20 +354,15 @@ _SCHWAB_SITUATIONS: dict[str, dict[str, Any]] = {
             'schwab_update_patron_credential(npub=<patron_npub>, field="account_hash", value=<hash>) to set your preferred account',
         ],
     },
-    "npub_missing": {
-        "error_code": "npub_invalid",
-        "error": "npub is required. Pass your Nostr public key (npub1...) to identify yourself.",
-        "next_steps": [],
-    },
 }
 
 
 def _resolution_for(situation: str) -> dict[str, Any]:
     """Build a structured error response for a session-restoration situation.
 
-    Schwab-specific situations (account_hash_required, npub_missing) are
-    handled inline; everything else delegates to the wheel's standard
-    OAuth situation mapping.
+    Schwab-specific situations (account_hash_required) are handled
+    inline; everything else delegates to the wheel's standard OAuth
+    situation mapping.
     """
     if situation in _SCHWAB_SITUATIONS:
         return {"success": False, **_SCHWAB_SITUATIONS[situation]}
@@ -386,8 +382,9 @@ async def _require_session(npub: str):
     on any non-success situation — never raises ValueError for routine
     refresh paths.
     """
-    if not npub or not npub.startswith("npub1"):
-        return _resolution_for("npub_missing")
+    err = runtime.npub_validation_error(npub)
+    if err is not None:
+        return err
 
     # Always go through the wheel's restore-refresh-persist cycle.
     creds, situation = await runtime.restore_oauth_session(npub)

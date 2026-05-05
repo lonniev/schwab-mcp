@@ -22,22 +22,26 @@ VALID_NPUB = "npub1l94pd4qu4eszrl6ek032ftcnsu3tt9a7xvq2zp7eaxeklp6mrpzssmq8pf"
 
 
 class TestResolutionFor:
-    """The situation→error_code mapping is the contract calling agents see."""
+    """Situation→error_code mapping is what calling agents see.
+    Mapping is 1:1 — same recovery flow can share next_steps but
+    not error_code."""
 
-    def test_token_expired_maps_to_oauth_refresh_needed(self):
+    def test_token_expired_maps_to_oauth_token_expired(self):
         from server import _resolution_for
         result = _resolution_for("token_expired")
         assert result["success"] is False
-        assert result["error_code"] == "oauth_refresh_needed"
+        assert result["error_code"] == "oauth_token_expired"
         assert any("schwab_begin_oauth" in step for step in result["next_steps"])
 
-    def test_no_credentials_maps_to_oauth_refresh_needed(self):
+    def test_no_credentials_maps_to_oauth_not_yet_authorized(self):
+        """Distinct from token_expired — first-time vs returning patron signal."""
         from server import _resolution_for
         result = _resolution_for("no_credentials")
-        assert result["error_code"] == "oauth_refresh_needed"
+        assert result["error_code"] == "oauth_not_yet_authorized"
         assert any("schwab_begin_oauth" in step for step in result["next_steps"])
 
     def test_no_account_hash_maps_to_account_hash_required(self):
+        """Schwab-specific situation handled inline."""
         from server import _resolution_for
         result = _resolution_for("no_account_hash")
         assert result["error_code"] == "account_hash_required"
@@ -48,37 +52,43 @@ class TestResolutionFor:
         result = _resolution_for("vault_bootstrapping")
         assert result["error_code"] == "warming_up"
 
-    def test_operator_not_configured_maps_through(self):
+    def test_operator_not_configured_maps_to_credentials_missing(self):
         from server import _resolution_for
         result = _resolution_for("operator_not_configured")
-        assert result["error_code"] == "operator_not_configured"
+        assert result["error_code"] == "operator_credentials_missing"
 
-    def test_unknown_situation_falls_back_to_no_credentials(self):
+    def test_no_oauth_config_maps_to_oauth_not_wired(self):
+        from server import _resolution_for
+        result = _resolution_for("no_oauth_config")
+        assert result["error_code"] == "oauth_not_wired"
+
+    def test_unknown_situation_returns_unknown_code(self):
+        """Don't silently mask unknown situations as a routine code."""
         from server import _resolution_for
         result = _resolution_for("some_new_situation_we_havent_seen")
-        # Falls through to oauth_refresh_needed (the no_credentials default)
-        assert result["error_code"] == "oauth_refresh_needed"
+        assert result["error_code"] == "oauth_situation_unknown"
 
 
 class TestRequireSession:
     """_require_session always returns a UserSession or a structured error dict."""
 
     @pytest.mark.asyncio
-    async def test_missing_npub_returns_npub_invalid_dict(self):
+    async def test_missing_npub_returns_npub_missing_dict(self):
+        """Distinct from invalid-format — caller didn't pass npub at all."""
         from server import _require_session
         result = await _require_session("")
         assert isinstance(result, dict)
-        assert result["error_code"] == "npub_invalid"
+        assert result["error_code"] == "npub_missing"
 
     @pytest.mark.asyncio
-    async def test_non_npub_prefix_returns_npub_invalid_dict(self):
+    async def test_malformed_npub_returns_npub_invalid_dict(self):
         from server import _require_session
         result = await _require_session("not-an-npub")
         assert isinstance(result, dict)
         assert result["error_code"] == "npub_invalid"
 
     @pytest.mark.asyncio
-    async def test_token_expired_returns_oauth_refresh_needed_dict(self):
+    async def test_token_expired_returns_oauth_token_expired_dict(self):
         """Patron's refresh token aged out — surfaces as a structured dict, not raise."""
         import server as srv
 
@@ -89,7 +99,7 @@ class TestRequireSession:
             result = await srv._require_session(VALID_NPUB)
 
         assert isinstance(result, dict)
-        assert result["error_code"] == "oauth_refresh_needed"
+        assert result["error_code"] == "oauth_token_expired"
         assert any("schwab_begin_oauth" in step for step in result["next_steps"])
 
     @pytest.mark.asyncio
@@ -112,7 +122,7 @@ class TestRequireSession:
         assert result["error_code"] == "account_hash_required"
 
     @pytest.mark.asyncio
-    async def test_operator_creds_missing_returns_operator_not_configured(self):
+    async def test_operator_creds_missing_returns_credentials_missing(self):
         """Operator hasn't delivered Schwab app credentials yet."""
         import server as srv
 
@@ -134,7 +144,7 @@ class TestRequireSession:
             result = await srv._require_session(VALID_NPUB)
 
         assert isinstance(result, dict)
-        assert result["error_code"] == "operator_not_configured"
+        assert result["error_code"] == "operator_credentials_missing"
 
     @pytest.mark.asyncio
     async def test_success_returns_user_session(self):
