@@ -29,6 +29,7 @@ class SchwabClient:
         client_secret: str,
         token_dict: dict,
         api_base: str = _DEFAULT_API_BASE,
+        on_token_refresh=None,
     ) -> None:
         self._client_id = client_id
         self._client_secret = client_secret
@@ -36,6 +37,9 @@ class SchwabClient:
         self._api_base = api_base.rstrip("/")
         self._http = httpx.AsyncClient()
         self._refresh_lock = asyncio.Lock()
+        # Optional async callback fired after a successful refresh.
+        # Wired by schwab-mcp to persist rotated tokens to the vault.
+        self._on_token_refresh = on_token_refresh
 
     # ------------------------------------------------------------------
     # Token management
@@ -77,6 +81,16 @@ class SchwabClient:
             self._token["refresh_token"] = data["refresh_token"]
 
         logger.info("Schwab access token refreshed successfully.")
+
+        # Persist the rotated token to vault if a callback is wired.
+        # Without this, a refresh-token rotation here would be lost
+        # on the next process restart, forcing the user back through
+        # the browser OAuth dance.
+        if self._on_token_refresh is not None:
+            try:
+                await self._on_token_refresh(self._token)
+            except Exception as exc:
+                logger.warning("on_token_refresh callback failed: %s", exc)
 
     # ------------------------------------------------------------------
     # HTTP helpers

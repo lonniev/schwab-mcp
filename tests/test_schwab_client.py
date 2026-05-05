@@ -107,6 +107,57 @@ class TestTokenRefresh:
         headers = call_kwargs.kwargs.get("headers", call_kwargs[1].get("headers", {}))
         assert "Basic" in headers["Authorization"]
 
+    @pytest.mark.asyncio
+    async def test_on_token_refresh_callback_fires_with_new_token(self):
+        """In-memory refresh invokes on_token_refresh so the rotated
+        token can be persisted to vault — closes the prior gap where
+        rotated refresh_tokens were lost on process restart."""
+        callback = AsyncMock()
+        token = _expired_token()
+        c = SchwabClient(
+            "cid", "csecret", token, "https://api.schwabapi.com",
+            on_token_refresh=callback,
+        )
+        c._http = AsyncMock()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "access_token": "tok_rotated",
+            "expires_in": 1800,
+            "refresh_token": "ref_rotated",
+        }
+        mock_resp.raise_for_status.return_value = None
+        c._http.post.return_value = mock_resp
+
+        await c._ensure_token()
+
+        callback.assert_awaited_once()
+        delivered = callback.await_args[0][0]
+        assert delivered["access_token"] == "tok_rotated"
+        assert delivered["refresh_token"] == "ref_rotated"
+
+    @pytest.mark.asyncio
+    async def test_on_token_refresh_callback_failure_does_not_block(self):
+        """A failing persist callback must not break the refresh path —
+        the in-memory refresh has already succeeded; persistence is
+        best-effort belt-and-suspenders."""
+        async def failing(_token):
+            raise RuntimeError("vault unavailable")
+
+        token = _expired_token()
+        c = SchwabClient(
+            "cid", "csecret", token, "https://api.schwabapi.com",
+            on_token_refresh=failing,
+        )
+        c._http = AsyncMock()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"access_token": "tok_new", "expires_in": 1800}
+        mock_resp.raise_for_status.return_value = None
+        c._http.post.return_value = mock_resp
+
+        # Must not raise
+        await c._ensure_token()
+        assert c._token["access_token"] == "tok_new"
+
 
 class TestGetRequests:
     """Convenience method URL + param building."""

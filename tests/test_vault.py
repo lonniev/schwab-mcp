@@ -1,6 +1,5 @@
-"""Tests for vault module — per-user session management."""
+"""Tests for vault module — UserSession bundle + _create_client wiring."""
 
-import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
@@ -11,67 +10,8 @@ def _make_mock_client():
     return client
 
 
-def test_set_and_get_session():
-    """set_session stores a session retrievable by get_session."""
-    from vault import _sessions, get_session, set_session
-
-    _sessions.clear_all()
-
-    client = _make_mock_client()
-    session = set_session(
-        user_id="user-1",
-        token_json='{"access_token": "tok"}',
-        account_hash="hash123",
-        client=client,
-        npub="npub1abc",
-    )
-
-    assert session.token_json == '{"access_token": "tok"}'
-    assert session.account_hash == "hash123"
-    assert session.client is client
-    assert session.npub == "npub1abc"
-
-    retrieved = get_session("user-1")
-    assert retrieved is session
-
-    _sessions.clear_all()
-
-
-def test_get_session_returns_none_for_unknown():
-    """get_session returns None for unknown user."""
-    from vault import _sessions, get_session
-
-    _sessions.clear_all()
-    assert get_session("unknown-user") is None
-
-
-def test_get_session_expires():
-    """get_session returns None for expired sessions."""
-    from vault import SESSION_TTL_SECONDS, _sessions, get_session, set_session
-
-    _sessions.clear_all()
-
-    now = time.time()
-    client = _make_mock_client()
-
-    # Create session at "now", then ask for it at "now + TTL + 1"
-    with patch("time.time", return_value=now):
-        set_session("user-2", '{"t": "x"}', "hash", client)
-
-    with patch("time.time", return_value=now + SESSION_TTL_SECONDS + 1):
-        assert get_session("user-2") is None
-        assert "user-2" not in _sessions
-
-    _sessions.clear_all()
-
-
-def get_session_helper(user_id):
-    from vault import get_session
-    return get_session(user_id)
-
-
-def test_session_repr():
-    """UserSession repr redacts sensitive fields."""
+def test_session_repr_redacts_sensitive_fields():
+    """UserSession repr redacts token and account_hash."""
     from vault import UserSession
 
     session = UserSession(
@@ -86,17 +26,19 @@ def test_session_repr():
     assert "hash123" not in repr_str
 
 
-def test_create_client():
-    """_create_client creates SchwabClient with correct params."""
+def test_create_client_passes_through_params():
+    """_create_client constructs a SchwabClient with parsed token + on_token_refresh."""
     with patch("vault.SchwabClient") as mock_cls:
         mock_cls.return_value = _make_mock_client()
 
         from vault import _create_client
 
-        client = _create_client(
+        cb = AsyncMock()
+        _create_client(
             client_id="op_id",
             client_secret="op_secret",
             token_json='{"access_token": "user_tok"}',
+            on_token_refresh=cb,
         )
 
         mock_cls.assert_called_once_with(
@@ -104,5 +46,5 @@ def test_create_client():
             "op_secret",
             {"access_token": "user_tok"},
             "https://api.schwabapi.com",
+            on_token_refresh=cb,
         )
-        assert client is not None

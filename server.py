@@ -339,112 +339,139 @@ async def _ensure_operator_credentials() -> dict[str, str]:
 # Session identity is now npub-only — no Horizon user_id mapping needed.
 
 
-async def _restore_session_from_vault(
-    session_key: str, patron_npub: str,
-) -> tuple[Any, str]:
-    """Attempt to restore a patron session from the encrypted vault.
+# Map each lifecycle situation to a structured error_code + next_steps
+# the caller can act on. The proof/oauth split here is what lets calling
+# agents route directly to the right recovery flow without parsing prose.
+_OAUTH_RECOVERY_STEPS = [
+    "schwab_begin_oauth(npub=<patron_npub>)",
+    "Open the authorize_url, log in, click Allow",
+    "schwab_check_oauth_status(npub=<patron_npub>) promptly after Allow",
+]
 
-    Delegates token loading and refresh to the wheel's generic
-    ``restore_oauth_session`` — which handles expiration checking,
-    token refresh via the provider, and persistence of rotated tokens.
-
-    Returns (session, "") on success, or (None, situation) describing
-    which lifecycle state the system is in.
-    """
-    # Stage 1: restore (and refresh if needed) via the wheel
-    creds, situation = await runtime.restore_oauth_session(patron_npub)
-    if creds is None:
-        return None, situation
-
-    # Stage 2: Does the patron have an account_hash set?
-    account_hash = creds.get("account_hash", "")
-    if not account_hash:
-        return None, "no_account_hash"
-
-    # Stage 3: Can we build a live Schwab client?
-    try:
-        op_creds = await _ensure_operator_credentials()
-    except Exception:
-        return None, "operator_not_configured"
-
-    try:
-        settings = _get_settings()
-        from vault import _create_client, set_session
-
-        client = _create_client(
-            op_creds["client_id"],
-            op_creds["client_secret"],
-            creds["token_json"],
-            api_base=settings.schwab_trader_api,
-        )
-        session = set_session(
-            session_key,
-            creds["token_json"],
-            account_hash,
-            client,
-            npub=patron_npub,
-        )
-        logger.info("Restored session for %s from vault.", patron_npub[:20])
-        return session, ""
-    except Exception:
-        return None, "token_expired"
-
-
-# Patron-facing guidance for each lifecycle state.
-_SESSION_GUIDANCE: dict[str, str] = {
-    "vault_bootstrapping": (
-        "The server is establishing its encrypted connection to the "
-        "credential vault. This happens once after a cold start. "
-        "Action: repeat your request shortly — no re-authentication needed."
-    ),
-    "operator_not_configured": (
-        "The operator's Schwab API application credentials have not been "
-        "delivered yet. This is an operator setup step, not a patron action. "
-        "The operator needs to complete Secure Courier onboarding with their "
-        "Schwab app_key and secret. "
-        "Action: contact the operator or try again later."
-    ),
-    "token_expired": (
-        "Your Schwab OAuth session was found in the vault but the access "
-        "token can no longer be refreshed — Schwab refresh tokens have a "
-        "finite lifetime set by the upstream provider. "
-        "Action: call begin_oauth to complete a new Schwab authorization. "
-        "This is a one-time browser sign-in that refreshes your access."
-    ),
-    "no_credentials": (
-        "No Schwab credentials are stored for your identity. This is "
-        "expected on first use. "
-        "Action: call begin_oauth to link your Schwab account through a "
-        "secure browser-based authorization. Your credentials will be "
-        "encrypted and stored so future sessions restore automatically."
-    ),
-    "no_account_hash": (
-        "Your Schwab OAuth session is active but no account has been "
-        "selected yet. "
-        "Action: call get_account_numbers to see your accounts, then "
-        'call update_patron_credential(field="account_hash", value=<hash>) '
-        "to set your preferred account."
-    ),
+_SITUATION_RESOLUTION: dict[str, dict[str, Any]] = {
+    "vault_bootstrapping": {
+        "error_code": "warming_up",
+        "error": (
+            "The server is establishing its encrypted connection to the "
+            "credential vault. This happens once after a cold start."
+        ),
+        "next_steps": ["Repeat your request shortly — no re-authentication needed."],
+    },
+    "operator_not_configured": {
+        "error_code": "operator_not_configured",
+        "error": (
+            "The operator's Schwab API application credentials have not been "
+            "delivered yet. This is an operator setup step, not a patron action."
+        ),
+        "next_steps": ["Contact the operator", "Try again later"],
+    },
+    "no_oauth_config": {
+        "error_code": "operator_not_configured",
+        "error": "OAuth provider is not configured on this operator.",
+        "next_steps": ["Contact the operator"],
+    },
+    "token_expired": {
+        "error_code": "oauth_refresh_needed",
+        "error": (
+            "Schwab refresh token has expired or been revoked. A new browser "
+            "authorization is needed. This is routine when refresh tokens age out."
+        ),
+        "next_steps": _OAUTH_RECOVERY_STEPS,
+    },
+    "no_credentials": {
+        "error_code": "oauth_refresh_needed",
+        "error": "No Schwab credentials are stored for your identity. This is expected on first use.",
+        "next_steps": _OAUTH_RECOVERY_STEPS,
+    },
+    "no_account_hash": {
+        "error_code": "account_hash_required",
+        "error": "Your Schwab OAuth session is active but no account has been selected yet.",
+        "next_steps": [
+            "schwab_get_account_numbers(npub=<patron_npub>) to see your accounts",
+            'schwab_update_patron_credential(npub=<patron_npub>, field="account_hash", value=<hash>) to set your preferred account',
+        ],
+    },
+    "npub_missing": {
+        "error_code": "npub_invalid",
+        "error": "npub is required. Pass your Nostr public key (npub1...) to identify yourself.",
+        "next_steps": [],
+    },
 }
 
 
+def _resolution_for(situation: str) -> dict[str, Any]:
+    """Build a structured error response for a session-restoration situation."""
+    spec = _SITUATION_RESOLUTION.get(situation) or _SITUATION_RESOLUTION["no_credentials"]
+    return {"success": False, **spec}
+
+
 async def _require_session(npub: str):
-    """Get per-patron session by npub, restoring from vault on cold start."""
+    """Resolve a patron's Schwab session, refreshing tokens transparently.
+
+    Always routes through ``runtime.restore_oauth_session`` which loads
+    from vault, refreshes via the upstream provider if expired, and
+    persists rotated tokens back to vault.  Eliminates the prior bug
+    where in-memory token refresh was lost on process restart.
+
+    Returns a ``UserSession`` on success, or a structured error dict
+    (``{"success": False, "error_code": ..., "next_steps": [...]}``)
+    on any non-success situation — never raises ValueError for routine
+    refresh paths.
+    """
     if not npub or not npub.startswith("npub1"):
-        raise ValueError("npub is required for session lookup.")
-    from vault import get_session
+        return _resolution_for("npub_missing")
 
-    session = get_session(npub)
-    if session is not None:
-        return session
+    # Always go through the wheel's restore-refresh-persist cycle.
+    creds, situation = await runtime.restore_oauth_session(npub)
+    if creds is None:
+        return _resolution_for(situation)
 
-    # Try vault restoration (survives process restarts)
-    restored, situation = await _restore_session_from_vault(npub, npub)
-    if restored is not None:
-        return restored
+    account_hash = creds.get("account_hash", "")
+    if not account_hash:
+        return _resolution_for("no_account_hash")
 
-    guidance = _SESSION_GUIDANCE.get(situation, _SESSION_GUIDANCE["no_credentials"])
-    raise ValueError(guidance)
+    try:
+        op_creds = await _ensure_operator_credentials()
+    except Exception:
+        return _resolution_for("operator_not_configured")
+
+    settings = _get_settings()
+    from vault import UserSession, _create_client
+
+    # Wire a refresh-persist callback so any in-memory refresh
+    # inside SchwabClient (race conditions, near-expiry windows)
+    # also reaches the vault — belt-and-suspenders alongside the
+    # primary restore_oauth_session path.
+    async def _persist_refreshed(token_dict: dict[str, Any]) -> None:
+        try:
+            import json as _json
+            import time as _time
+            vault_data = {
+                "token_json": _json.dumps(token_dict),
+                "access_token": token_dict.get("access_token", ""),
+                "refresh_token": token_dict.get("refresh_token", creds.get("refresh_token", "")),
+                "expires_at": str(token_dict.get("expires_at", _time.time() + 1800)),
+                "token_type": token_dict.get("token_type", "Bearer"),
+                "account_hash": account_hash,
+            }
+            await runtime.store_patron_session(npub, vault_data, service="schwab")
+            logger.info("In-memory Schwab refresh persisted to vault for %s.", npub[:20])
+        except Exception as exc:
+            logger.warning("Failed to persist in-memory Schwab refresh: %s", exc)
+
+    client = _create_client(
+        op_creds["client_id"],
+        op_creds["client_secret"],
+        creds["token_json"],
+        api_base=settings.schwab_trader_api,
+        on_token_refresh=_persist_refreshed,
+    )
+    return UserSession(
+        token_json=creds["token_json"],
+        account_hash=account_hash,
+        client=client,
+        npub=npub,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -472,12 +499,11 @@ async def get_account_numbers(npub: NpubField = "", proof: str = "") -> str | di
     # Need OAuth tokens but NOT account_hash
     creds, situation = await runtime.restore_oauth_session(npub)
     if creds is None:
-        guidance = _SESSION_GUIDANCE.get(situation, _SESSION_GUIDANCE["no_credentials"])
-        return {"success": False, "error": guidance}
+        return _resolution_for(situation)
 
     access_token = creds.get("access_token", "")
     if not access_token:
-        return {"success": False, "error": _SESSION_GUIDANCE["no_credentials"]}
+        return _resolution_for("no_credentials")
 
     import httpx
     async with httpx.AsyncClient() as http:
@@ -514,6 +540,8 @@ async def get_brokerage_positions(npub: NpubField = "", proof: str = "") -> str 
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
+    if isinstance(session, dict):
+        return session
     from tools.account import get_positions as _get_positions
 
     return await _get_positions(session.client, session.account_hash)
@@ -527,6 +555,8 @@ async def get_brokerage_balances(npub: NpubField = "", proof: str = "") -> str |
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
+    if isinstance(session, dict):
+        return session
     from tools.account import get_account_balances as _get_account_balances
 
     return await _get_account_balances(session.client, session.account_hash)
@@ -543,6 +573,8 @@ async def get_stock_quote(
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
+    if isinstance(session, dict):
+        return session
     from tools.market import get_quote as _get_quote
 
     return await _get_quote(session.client, symbols)
@@ -566,6 +598,8 @@ async def get_option_chain(
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
+    if isinstance(session, dict):
+        return session
     from tools.options import get_option_chain as _get_option_chain
 
     return await _get_option_chain(
@@ -593,6 +627,8 @@ async def get_price_history(
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
+    if isinstance(session, dict):
+        return session
     from tools.market import get_price_history as _get_price_history
 
     return await _get_price_history(
@@ -616,6 +652,8 @@ async def get_market_movers(
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
+    if isinstance(session, dict):
+        return session
     from tools.market import get_movers as _get_movers
 
     return await _get_movers(session.client, index, sort, frequency)
@@ -636,6 +674,8 @@ async def get_market_hours(
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
+    if isinstance(session, dict):
+        return session
     from tools.market import get_market_hours as _get_market_hours
 
     return await _get_market_hours(
@@ -658,6 +698,8 @@ async def search_instruments(
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
+    if isinstance(session, dict):
+        return session
     from tools.market import search_instruments as _search_instruments
 
     return await _search_instruments(
@@ -681,6 +723,8 @@ async def get_brokerage_orders(
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
+    if isinstance(session, dict):
+        return session
     from tools.account import get_orders as _get_orders
 
     return await _get_orders(
@@ -703,6 +747,8 @@ async def get_brokerage_order(
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
+    if isinstance(session, dict):
+        return session
     from tools.account import get_order as _get_order
 
     return await _get_order(session.client, session.account_hash, order_id)
@@ -724,6 +770,8 @@ async def get_brokerage_transactions(
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
+    if isinstance(session, dict):
+        return session
     from tools.account import get_transactions as _get_transactions
 
     return await _get_transactions(
@@ -746,6 +794,8 @@ async def get_brokerage_transaction(
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
+    if isinstance(session, dict):
+        return session
     from tools.account import get_transaction as _get_transaction
 
     return await _get_transaction(

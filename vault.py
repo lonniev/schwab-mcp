@@ -1,19 +1,17 @@
-"""Multi-tenant session management for schwab-mcp.
+"""Per-call Schwab session construction for schwab-mcp.
 
-Per-user Schwab OAuth sessions backed by in-memory cache.
-Each user delivers their token_json + account_hash via Secure Courier;
-the server creates a SchwabClient from operator creds + user token
-and caches it here.
+A ``UserSession`` is a transient bundle of (token, account_hash,
+SchwabClient) built fresh from the vault on each paid call.  No
+in-memory cache: ``runtime.restore_oauth_session`` handles refresh
+and persistence on every call, so a rotated refresh_token always
+reaches the vault and survives process restart.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import time
-from dataclasses import dataclass, field
-
-from tollbooth.session_cache import SessionCache
+from dataclasses import dataclass
 
 from schwab_client import SchwabClient
 
@@ -21,36 +19,21 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_API_BASE = "https://api.schwabapi.com"
 
-SESSION_TTL_SECONDS = 3600  # 1 hour
-
 
 @dataclass
 class UserSession:
-    """Per-user session holding a cached SchwabClient."""
+    """Bundle of patron credentials + a live SchwabClient for one call."""
 
     token_json: str  # Schwab OAuth token blob (JSON string)
     account_hash: str  # Schwab account hash
-    client: SchwabClient  # Cached async client
+    client: SchwabClient  # Live async client
     npub: str | None = None
-    created_at: float = field(default_factory=time.time)
 
     def __repr__(self) -> str:
-        age = int(time.time() - self.created_at)
         return (
-            f"UserSession(npub={self.npub!r}, age={age}s, "
+            f"UserSession(npub={self.npub!r}, "
             f"account_hash=<redacted>, token=<redacted>)"
         )
-
-    @property
-    def is_expired(self) -> bool:
-        return (time.time() - self.created_at) > SESSION_TTL_SECONDS
-
-    @property
-    def age_seconds(self) -> int:
-        return int(time.time() - self.created_at)
-
-
-_sessions: SessionCache[UserSession] = SessionCache(ttl_seconds=SESSION_TTL_SECONDS)
 
 
 def _create_client(
@@ -58,41 +41,18 @@ def _create_client(
     client_secret: str,
     token_json: str,
     api_base: str = _DEFAULT_API_BASE,
+    on_token_refresh=None,
 ) -> SchwabClient:
-    """Create a SchwabClient from operator creds + user token JSON."""
+    """Create a SchwabClient from operator creds + user token JSON.
+
+    ``on_token_refresh`` is an optional ``async (token_dict) -> None``
+    callback the SchwabClient invokes after a successful in-memory
+    token refresh.  schwab-mcp wires it to persist the rotated token
+    back to the vault so a new refresh_token survives process
+    restart.
+    """
     token_dict = json.loads(token_json) if isinstance(token_json, str) else token_json
-    return SchwabClient(client_id, client_secret, token_dict, api_base)
-
-
-def set_session(
-    user_id: str,
-    token_json: str,
-    account_hash: str,
-    client: SchwabClient,
-    npub: str | None = None,
-) -> UserSession:
-    """Create or replace a session for a user."""
-    session = UserSession(
-        token_json=token_json,
-        account_hash=account_hash,
-        client=client,
-        npub=npub,
+    return SchwabClient(
+        client_id, client_secret, token_dict, api_base,
+        on_token_refresh=on_token_refresh,
     )
-    return _sessions.set(user_id, session)
-
-
-def get_session(user_id: str) -> UserSession | None:
-    """Get active session, returning None if expired or absent."""
-    return _sessions.get(user_id)
-
-
-async def clear_session(user_id: str) -> None:
-    """Remove a session and close its async client."""
-    session = _sessions.clear(user_id)
-    if session and session.client:
-        try:
-            await session.client.close()
-        except Exception:
-            pass
-
-
