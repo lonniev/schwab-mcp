@@ -103,8 +103,8 @@ class TestRequireSession:
         assert any("schwab_begin_oauth" in step for step in result["next_steps"])
 
     @pytest.mark.asyncio
-    async def test_no_account_hash_returns_account_hash_required_dict(self):
-        """OAuth fine, but no account selected yet."""
+    async def test_no_account_hash_with_zero_accounts_returns_required(self):
+        """No selection AND upstream returns zero accounts → still ask."""
         import server as srv
 
         creds = {
@@ -112,14 +112,52 @@ class TestRequireSession:
             "token_json": '{"access_token": "tok"}',
             "account_hash": "",
         }
-        with patch.object(
-            srv.runtime, "restore_oauth_session",
-            new=AsyncMock(return_value=(creds, "")),
+        with (
+            patch.object(
+                srv.runtime, "restore_oauth_session",
+                new=AsyncMock(return_value=(creds, "")),
+            ),
+            patch.object(
+                srv, "_try_auto_select_account_hash",
+                new=AsyncMock(return_value=None),
+            ),
         ):
             result = await srv._require_session(VALID_NPUB)
 
         assert isinstance(result, dict)
         assert result["error_code"] == "account_hash_required"
+
+    @pytest.mark.asyncio
+    async def test_no_account_hash_with_single_account_auto_selects(self):
+        """Single-account patron skips explicit selection — common case."""
+        import server as srv
+        from vault import UserSession
+
+        creds = {
+            "access_token": "tok",
+            "token_json": '{"access_token": "tok"}',
+            "account_hash": "",  # not yet selected
+            "refresh_token": "rt",
+        }
+        with (
+            patch.object(
+                srv.runtime, "restore_oauth_session",
+                new=AsyncMock(return_value=(creds, "")),
+            ),
+            patch.object(
+                srv, "_try_auto_select_account_hash",
+                new=AsyncMock(return_value="auto-selected-hash"),
+            ),
+            patch.object(
+                srv, "_ensure_operator_credentials",
+                new=AsyncMock(return_value={"client_id": "id", "client_secret": "sec"}),
+            ),
+            patch("vault._create_client", return_value=MagicMock()),
+        ):
+            result = await srv._require_session(VALID_NPUB)
+
+        assert isinstance(result, UserSession)
+        assert result.account_hash == "auto-selected-hash"
 
     @pytest.mark.asyncio
     async def test_operator_creds_missing_returns_credentials_missing(self):
@@ -177,6 +215,122 @@ class TestRequireSession:
         # so any in-memory refresh is persisted back to the vault.
         _, kwargs = mock_create.call_args
         assert kwargs.get("on_token_refresh") is not None
+
+
+class TestAutoSelectAccountHash:
+    """_try_auto_select_account_hash returns the hash for single-account
+    patrons and None otherwise — letting _require_session fall back to
+    the explicit account_hash_required recipe for multi-account cases."""
+
+    @pytest.mark.asyncio
+    async def test_single_account_returns_hash_and_persists(self):
+        import server as srv
+
+        single = [{"accountNumber": "12345", "hashValue": "abc-hash"}]
+
+        async def fake_get(self, url, headers=None, timeout=None):
+            class _R:
+                def raise_for_status(self_inner):
+                    pass
+                def json(self_inner):
+                    return single
+            return _R()
+
+        persisted: dict[str, str] = {}
+        async def fake_update(npub, field, value):
+            persisted[field] = value
+            return True
+
+        creds = {"access_token": "tok"}
+        with (
+            patch("httpx.AsyncClient.get", new=fake_get),
+            patch.object(srv.runtime, "update_patron_credential", new=fake_update),
+        ):
+            result = await srv._try_auto_select_account_hash(VALID_NPUB, creds)
+
+        assert result == "abc-hash"
+        assert persisted == {"account_hash": "abc-hash"}
+
+    @pytest.mark.asyncio
+    async def test_multiple_accounts_returns_none(self):
+        """Multi-account patrons must choose explicitly — no auto-pick."""
+        import server as srv
+
+        many = [
+            {"accountNumber": "1", "hashValue": "h1"},
+            {"accountNumber": "2", "hashValue": "h2"},
+        ]
+
+        async def fake_get(self, url, headers=None, timeout=None):
+            class _R:
+                def raise_for_status(self_inner):
+                    pass
+                def json(self_inner):
+                    return many
+            return _R()
+
+        with patch("httpx.AsyncClient.get", new=fake_get):
+            result = await srv._try_auto_select_account_hash(
+                VALID_NPUB, {"access_token": "tok"},
+            )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_zero_accounts_returns_none(self):
+        import server as srv
+
+        async def fake_get(self, url, headers=None, timeout=None):
+            class _R:
+                def raise_for_status(self_inner):
+                    pass
+                def json(self_inner):
+                    return []
+            return _R()
+
+        with patch("httpx.AsyncClient.get", new=fake_get):
+            result = await srv._try_auto_select_account_hash(
+                VALID_NPUB, {"access_token": "tok"},
+            )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_missing_access_token_returns_none(self):
+        import server as srv
+        result = await srv._try_auto_select_account_hash(
+            VALID_NPUB, {"access_token": ""},
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_persistence_failure_still_returns_hash(self):
+        """Best-effort persistence — if update_patron_credential fails,
+        the auto-select still proceeds; next call simply re-auto-selects."""
+        import server as srv
+
+        single = [{"accountNumber": "12345", "hashValue": "abc-hash"}]
+
+        async def fake_get(self, url, headers=None, timeout=None):
+            class _R:
+                def raise_for_status(self_inner):
+                    pass
+                def json(self_inner):
+                    return single
+            return _R()
+
+        async def failing_update(*args, **kwargs):
+            raise RuntimeError("vault unavailable")
+
+        with (
+            patch("httpx.AsyncClient.get", new=fake_get),
+            patch.object(srv.runtime, "update_patron_credential", new=failing_update),
+        ):
+            result = await srv._try_auto_select_account_hash(
+                VALID_NPUB, {"access_token": "tok"},
+            )
+
+        assert result == "abc-hash"
 
 
 class TestToolRegistry:

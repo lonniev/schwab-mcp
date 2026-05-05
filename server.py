@@ -348,10 +348,15 @@ async def _ensure_operator_credentials() -> dict[str, str]:
 _SCHWAB_SITUATIONS: dict[str, dict[str, Any]] = {
     "no_account_hash": {
         "error_code": "account_hash_required",
-        "error": "Your Schwab OAuth session is active but no account has been selected yet.",
+        "error": (
+            "You have multiple Schwab accounts and none is selected as the "
+            "default. (Single-account patrons are auto-selected; this only "
+            "fires when explicit choice is required.)"
+        ),
         "next_steps": [
-            "schwab_get_account_numbers(npub=<patron_npub>) to see your accounts",
-            'schwab_update_patron_credential(npub=<patron_npub>, field="account_hash", value=<hash>) to set your preferred account',
+            "schwab_get_account_numbers(npub=<patron_npub>) to list your accounts",
+            'schwab_update_patron_credential(npub=<patron_npub>, field="account_hash", value=<hash>) to record your choice',
+            "Retry the original tool call — selection persists across operator restarts",
         ],
     },
 }
@@ -367,6 +372,63 @@ def _resolution_for(situation: str) -> dict[str, Any]:
     if situation in _SCHWAB_SITUATIONS:
         return {"success": False, **_SCHWAB_SITUATIONS[situation]}
     return runtime.oauth_situation_response(situation)
+
+
+async def _try_auto_select_account_hash(
+    npub: str, creds: dict[str, Any],
+) -> str | None:
+    """If the patron has exactly one Schwab account, persist+return its hash.
+
+    Common-case shortcut for the bootstrap path: single-account patrons
+    skip the explicit get_account_numbers → update_patron_credential
+    round-trip. Multi-account or zero-account patrons return None so
+    _require_session can surface the standard ``account_hash_required``
+    recipe and let the patron choose deliberately.
+
+    Best-effort: a network failure or unexpected upstream shape returns
+    None, falling back to the explicit-selection path.
+    """
+    access_token = creds.get("access_token", "")
+    if not access_token:
+        return None
+
+    import httpx as _httpx
+    settings = _get_settings()
+    try:
+        async with _httpx.AsyncClient() as http:
+            resp = await http.get(
+                f"{settings.schwab_trader_api}/trader/v1/accounts/accountNumbers",
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=10.0,
+            )
+            resp.raise_for_status()
+            accounts = resp.json()
+    except Exception as exc:
+        logger.info("Auto-select account fetch failed for %s: %s", npub[:20], exc)
+        return None
+
+    if not isinstance(accounts, list) or len(accounts) != 1:
+        # Zero or many — let the patron pick explicitly
+        return None
+
+    selected = accounts[0].get("hashValue", "")
+    if not selected:
+        return None
+
+    # Persist via the wheel's update_patron_credential, which on v0.17.3+
+    # routes to the OAuth service blob automatically when no patron
+    # credential template is set. Best-effort — if persistence fails,
+    # we still return the hash so this call succeeds; the next call
+    # will simply re-auto-select.
+    try:
+        await runtime.update_patron_credential(npub, "account_hash", selected)
+        logger.info(
+            "Auto-selected sole Schwab account for %s and persisted account_hash.",
+            npub[:20],
+        )
+    except Exception as exc:
+        logger.warning("Auto-select persist failed (will retry next call): %s", exc)
+    return selected
 
 
 async def _require_session(npub: str):
@@ -393,7 +455,15 @@ async def _require_session(npub: str):
 
     account_hash = creds.get("account_hash", "")
     if not account_hash:
-        return _resolution_for("no_account_hash")
+        # Single-account patrons are the common case. Fetch the account
+        # list and auto-select if there's exactly one — saves the agent
+        # an entire round-trip through get_account_numbers + update_patron_credential.
+        # Multi-account or zero-account patrons still get the explicit
+        # account_hash_required recipe so they choose deliberately.
+        auto = await _try_auto_select_account_hash(npub, creds)
+        if auto is None:
+            return _resolution_for("no_account_hash")
+        account_hash = auto
 
     try:
         op_creds = await _ensure_operator_credentials()
