@@ -623,9 +623,23 @@ async def get_brokerage_balances(npub: NpubField = "", proof: str = "") -> str |
     measure of "how much did I make/lose today"). Schwab's account
     response does not expose a single "dayProfitLoss" field — the
     convention is to compute the delta against the start-of-day snapshot.
-    When either snapshot is missing, Day P&L reports 0.0 rather than
-    treating zero as the baseline (which would print today's full equity
-    as P&L).
+
+    Two fallback guards apply to Day P&L:
+      1. Missing snapshot — if either initialBalances or currentBalances
+         is absent or has a zero liquidationValue, Day P&L reports 0.0
+         rather than treating zero as the baseline (which would print
+         today's full equity as P&L).
+      2. Suspect snapshot — if the computed Day P&L is larger in
+         absolute value than half of current liquidation value (e.g.
+         $17,442 P&L on an $8,847 account), the initialBalances snapshot
+         is treated as stale or partial and Day P&L reports 0.0. A
+         legitimate 50%+ session change is implausible for any normal
+         account; the tool underreports in the rare real-50% case rather
+         than emitting nonsense in the more common stale-snapshot case.
+
+    When Day P&L reads $0.00 on a session where you expect a real number,
+    one of those two guards fired. Cross-check against position-level P&L
+    via get_brokerage_positions.
 
     Args:
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
@@ -717,6 +731,19 @@ async def get_option_chain(
         (extends the horizon).
       - An error response — the underlying symbol failed to resolve.
 
+    Strike-grid quirk worth knowing — interaction with the OI filter:
+      On high-priced underlyings (~$300+), $2.50-increment strikes often
+      exist on Schwab's underlying grid but carry OI below 25 in OTM
+      territory and get filtered out — leaving the VISIBLE chain at $5
+      increments with an occasional $2.50 outlier near ATM. Example: ISRG
+      around $420 typically shows $5 strikes; CRM around $177 shows $2.50
+      strikes everywhere. This is the OI filter interacting with market
+      microstructure, not "the underlying doesn't have $2.50 strikes."
+      The $2.50 grid is more reliably populated on underlyings in the
+      $50-$250 range. If you need a finer grid on an expensive underlying,
+      that's a sign to lower the OI floor, which currently requires editing
+      tools/options.py rather than passing a parameter.
+
     Args:
         symbol: Underlying ticker (equity or ETF). For index options use the
             $-prefix form: $SPX, $NDX, $RUT.
@@ -807,6 +834,12 @@ async def get_market_movers(
       Symbol | Description | Change % | Volume | Last
 
     Behavior worth knowing before reading the result:
+      - The Change % column is a SHORT-WINDOW TICK-LEVEL DELTA from
+        Schwab's mover feed — NOT session percent change vs prior close.
+        Observed values are typically tiny (e.g. NVDA +0.02%) even on a
+        day when the underlying has moved a full percent. For session %,
+        call get_stock_quote on the symbol — that's the netPercentChange
+        field, which is the canonical "how much did it move today" number.
       - The Volume column carries Schwab's AGGREGATE INDEX VOLUME — the same
         value appears in every row, not per-symbol volume. To get a symbol's
         own volume, call get_stock_quote on that symbol.
@@ -814,9 +847,12 @@ async def get_market_movers(
         a simple top-N sort of the index's constituents. Symbols not flagged
         as movers will be absent regardless of their actual change%, and you
         cannot reproduce the list by sorting the whole index yourself.
-      - The sort parameter influences which direction of movement Schwab
-        surfaces, but the returned rows are not strictly ordered by that
-        field — treat row order as Schwab's recommendation, not a sort key.
+      - The sort parameter is a HINT to Schwab's mover algorithm about which
+        direction of movement to prioritize surfacing. It does NOT guarantee
+        directional filtering: a sort=PERCENT_CHANGE_DOWN call may include
+        symbols moving up if Schwab's mover detection still flags them as
+        relevant. Treat row order as Schwab's recommendation, not a sort key,
+        and don't assume direction.
 
     Args:
         index: Index symbol. Schwab's movers endpoint supports only "$SPX",

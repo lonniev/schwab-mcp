@@ -295,6 +295,18 @@ async def get_account_balances(client: SchwabClient, account_hash: str) -> str:
     # full equity as "Day P&L", which is the bug we are fixing.
     day_pl = current_liq - initial_liq if current_liq and initial_liq else 0.0
 
+    # Schwab sometimes returns initialBalances.liquidationValue that is
+    # present-but-stale or partial — large enough to evade the "missing
+    # snapshot" check above but so far off the current equity that the
+    # computed Day P&L is nonsensical (e.g. $17,442 P&L on an $8,847
+    # account). When the absolute Day P&L exceeds half of current
+    # liquidation value, treat the snapshot as suspect and report 0.0
+    # rather than a misleading number. A legitimate 50%-in-a-session
+    # move is implausible for any normal account; we'd rather underreport
+    # in that rare case than report nonsense in the common one.
+    if current_liq and abs(day_pl) > current_liq * 0.5:
+        day_pl = 0.0
+
     acct = AccountBalances(
         cash_balance=current.get("cashBalance", 0.0),
         buying_power=current.get("buyingPower", 0.0),

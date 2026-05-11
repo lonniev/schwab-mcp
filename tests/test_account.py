@@ -148,6 +148,33 @@ async def test_get_account_balances_missing_initial_snapshot():
     assert "**Day P&L:** $50,000.00" not in result
 
 
+async def test_get_account_balances_suppresses_implausible_day_pl():
+    """Schwab sometimes returns a stale-but-present initialBalances snapshot
+    that produces a nonsensical Day P&L (real example: $17,442 P&L on a
+    $8,847 net-liq account). The sanity check suppresses any |Day P&L|
+    larger than half of current liquidation value to 0.0."""
+    data = {
+        "securitiesAccount": {
+            # Stale snapshot — pretends start-of-day liq was much lower.
+            "initialBalances": {
+                "liquidationValue": -8595.0,
+            },
+            "currentBalances": {
+                "cashBalance": 1000.0,
+                "buyingPower": 2000.0,
+                "liquidationValue": 8847.0,
+            },
+        }
+    }
+    client = _mock_client(data)
+    result = await get_account_balances(client, "FAKE_HASH")
+
+    # Raw delta would be 8847 - (-8595) = 17,442 — way more than half of
+    # current liq (8847 * 0.5 = 4423.50). Sanity check fires; Day P&L = 0.
+    assert "**Day P&L:** $0.00" in result
+    assert "$17,442.00" not in result
+
+
 # ---------------------------------------------------------------------------
 # OCC symbol parsing tests
 # ---------------------------------------------------------------------------
