@@ -570,7 +570,32 @@ async def get_account_numbers(npub: NpubField = "", proof: str = "") -> str | di
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_positions"), catch_errors=True)
 async def get_brokerage_positions(npub: NpubField = "", proof: str = "") -> str | dict[str, Any]:
-    """Get positions for a Schwab account.
+    """Get current positions in the active Schwab account, with automatic
+    vertical-spread detection.
+
+    Pulls Schwab's account endpoint with fields="positions" and emits up to
+    three markdown sections, omitting any that are empty:
+
+      ## Spreads — vertical spreads detected from paired option legs:
+        - <underlying> <spread_type> (<short_strike>/<long_strike> P|C exp <date>,
+          DTE <n>) | Credit: $X | Max Loss: $Y | Current: $Z | P&L: $W
+
+      ## Options (unmatched) — single legs not paired into a spread:
+        - <underlying> <strike> P|C exp <date> (DTE <n>) | Qty: ±N | Avg: $X |
+          MktVal: $Y | P&L: $Z
+
+      ## Equities — long/short share positions:
+        - <symbol> | Qty: ±N | Avg: $X | Price: $Y | P&L: $Z
+
+    Quantities are computed as (longQuantity − shortQuantity) — short positions
+    show as negative numbers in Qty.
+
+    Spread detection is heuristic: legs of the same underlying with matching
+    expiration and put/call type, opposite long/short direction, and adjacent
+    strikes get paired. Anything that doesn't fit cleanly drops into Options
+    (unmatched). The tool does not currently detect iron condors, butterflies,
+    or calendars — those will appear as multiple Options (unmatched) rows.
+
     Args:
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
@@ -585,7 +610,22 @@ async def get_brokerage_positions(npub: NpubField = "", proof: str = "") -> str 
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_balances"), catch_errors=True)
 async def get_brokerage_balances(npub: NpubField = "", proof: str = "") -> str | dict[str, Any]:
-    """Get account balances for a Schwab account.
+    """Get the active Schwab account's current balance summary.
+
+    Pulls Schwab's account endpoint and returns four bold lines drawn from
+    securitiesAccount.currentBalances:
+
+      **Cash Balance:** cashBalance
+      **Buying Power:** buyingPower
+      **Net Liquidation:** liquidationValue
+      **Day P&L:** dayTradingBuyingPower
+
+    Note: the "Day P&L" label currently maps to Schwab's
+    dayTradingBuyingPower field, which is the buying power available for
+    day trading — not a session profit-and-loss figure. Use the raw value
+    as Schwab returns it; if you need true day P&L, compute it from
+    positions instead.
+
     Args:
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
@@ -705,13 +745,38 @@ async def get_price_history(
     frequency: int = 1,
     npub: NpubField = "", proof: str = "",
 ) -> str | dict[str, Any]:
-    """Get historical OHLCV price data for trend analysis.
+    """Get historical OHLCV candle data for a symbol.
+
+    Returns a markdown table of the most recent candles within the requested
+    period, capped at the last 30 rows for readability. A footnote line is
+    added when truncation occurs so the agent knows more data was available.
+
+    Columns:
+      Date | Open | High | Low | Close | Volume
+
+    Truncation rule (hardcoded in tools/market.py):
+      - The Schwab response may contain hundreds of candles; this tool
+        slices to the most recent 30 before formatting. The number of
+        candles Schwab actually returns is driven by Schwab's defaults for
+        the given (period_type, period, frequency_type, frequency) tuple,
+        not by a per-call parameter on this tool.
+
+    Schwab's valid combinations (from Schwab's price-history API):
+      - period_type "day": period in {1,2,3,4,5,10}; frequency_type "minute"
+        only; frequency in {1,5,10,15,30}.
+      - period_type "month": period in {1,2,3,6}; frequency_type in
+        {"daily","weekly"}.
+      - period_type "year": period in {1,2,3,5,10,15,20}; frequency_type in
+        {"daily","weekly","monthly"}.
+      - period_type "ytd": period in {1}; frequency_type in
+        {"daily","weekly"}.
+
     Args:
-        symbol: Ticker symbol.
+        symbol: Ticker symbol (equity, ETF, or $-prefixed index).
         period_type: "day", "month", "year", or "ytd".
-        period: Number of periods.
+        period: Number of periods (see valid combinations above).
         frequency_type: "minute", "daily", "weekly", or "monthly".
-        frequency: Frequency interval.
+        frequency: Frequency interval (only meaningful for "minute" candles).
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
@@ -776,11 +841,26 @@ async def get_market_hours(
     date: str = "",
     npub: NpubField = "", proof: str = "",
 ) -> str | dict[str, Any]:
-    """Get market hours for equity, option, bond, future, or forex markets.
+    """Get trading hours for one or more market types.
+
+    Returns nested markdown — one block per market product Schwab knows
+    about within the requested categories:
+
+      **<Product Name>** — OPEN | CLOSED
+        Pre Market:  YYYY-MM-DDTHH:MM — YYYY-MM-DDTHH:MM
+        Regular Market: YYYY-MM-DDTHH:MM — YYYY-MM-DDTHH:MM
+        Post Market: YYYY-MM-DDTHH:MM — YYYY-MM-DDTHH:MM
+
+    Sessions are emitted only when Schwab reports hours for them — a closed
+    market on a weekend or holiday will have no session lines under it.
 
     Args:
-        markets: Comma-separated: "equity", "option", "bond", "future", "forex".
-        date: ISO date to check (e.g. "2026-03-15"). Defaults to today.
+        markets: Comma-separated market types. Schwab supports "equity",
+            "option", "bond", "future", "forex". Unknown types are silently
+            dropped by Schwab.
+        date: ISO date to check (e.g. "2026-03-15"). Defaults to today when
+            empty. The response is for a single trading day — pass each date
+            explicitly if you need a multi-day forecast.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
@@ -800,9 +880,34 @@ async def search_instruments(
     projection: str = "symbol-search",
     npub: NpubField = "", proof: str = "",
 ) -> str | dict[str, Any]:
-    """Search for instruments by symbol, name, or CUSIP.
+    """Search Schwab's instrument catalog by symbol, name, or CUSIP.
+
+    Returns up to 25 results in a markdown list (capped server-side here;
+    Schwab itself may return more). A truncation footnote appears when the
+    full result set exceeded 25.
+
+    Each row carries: symbol, asset type, description, optional exchange,
+    optional CUSIP, and — when projection="fundamental" — P/E, dividend
+    yield, and market cap in $B or $M.
+
+      - **<SYM>** (<ASSET_TYPE>) — <description> [<EXCHANGE>] CUSIP:<CUSIP>
+        | P/E:N.N | Yield:N.NN% | MktCap:$XB
+
+    Projection options (Schwab's API enum — determines how the search term
+    is interpreted, not just what fields come back):
+      - symbol-search:  exact match on symbol (default; cheapest call).
+      - symbol-regex:   regex match against symbols. The pattern is regex,
+                        not a glob — "AAP.*" matches AAPL, AAP, etc.
+      - desc-search:    full-text match against the instrument description
+                        ("Apple", "semiconductor").
+      - desc-regex:     regex against descriptions.
+      - fundamental:    fetch fundamentals (P/E, yield, market cap) for a
+                        specific symbol. Use this when you already know the
+                        ticker and want the numbers, not a search.
+
     Args:
-        symbol: Search term -- ticker, partial name, or CUSIP.
+        symbol: Search term — ticker, regex, partial name, or CUSIP. The
+            interpretation depends on `projection`.
         projection: "symbol-search", "symbol-regex", "desc-search",
             "desc-regex", or "fundamental".
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
@@ -825,11 +930,34 @@ async def get_brokerage_orders(
     status_filter: str = "",
     npub: NpubField = "", proof: str = "",
 ) -> str | dict[str, Any]:
-    """Get order history for your Schwab account.
+    """Get order history for the active Schwab account.
+
+    Returns one markdown row per order:
+
+      - **<orderId>** [<status>] <orderType> | <leg1> / <leg2> / ... |
+        Price: $X @ $avg_fill | Filled: <qty> | <enteredTime>
+
+    Each leg formats as "<instruction> <quantity>x <symbol>" (e.g.
+    "BUY 1x AAPL", "SELL_TO_OPEN 5x AAPL  240315C00185000"). The avg_fill
+    suffix is the average across all executionLegs.price values for the
+    order; omitted if the order has no fills yet.
+
+    Date-window default — when from_date and to_date are both blank, the
+    tool defaults to the last 30 days (in UTC). Pass either parameter to
+    override; if you pass one, pass both.
+
+    Schwab's order status enum (values you can pass to status_filter):
+      AWAITING_PARENT_ORDER, AWAITING_CONDITION, AWAITING_STOP_CONDITION,
+      AWAITING_MANUAL_REVIEW, ACCEPTED, AWAITING_UR_OUT, PENDING_ACTIVATION,
+      QUEUED, WORKING, REJECTED, PENDING_CANCEL, CANCELED, PENDING_REPLACE,
+      REPLACED, FILLED, EXPIRED, NEW.
+
     Args:
-        from_date: Start date (ISO 8601). Defaults to 30 days ago.
-        to_date: End date (ISO 8601). Defaults to now.
-        status_filter: Optional status filter (e.g. "FILLED", "CANCELED", "WORKING").
+        from_date: Start of window, ISO 8601 (e.g. "2026-04-01T00:00:00.000Z").
+            Empty string defaults to 30 days ago.
+        to_date: End of window, ISO 8601. Empty string defaults to now.
+        status_filter: Optional single Schwab status value (e.g. "FILLED",
+            "CANCELED", "WORKING"). Empty string = all statuses.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
@@ -851,9 +979,20 @@ async def get_brokerage_orders(
 async def get_brokerage_order(
     order_id: str, npub: NpubField = "", proof: str = "",
 ) -> str | dict[str, Any]:
-    """Get details for a single order by ID.
+    """Get full details for a single order by Schwab order ID.
+
+    Returns the same one-line markdown format as get_brokerage_orders, with
+    the average fill price computed across all executionLegs:
+
+      - **<orderId>** [<status>] <orderType> | <legs> | Price: $X @ $avg_fill |
+        Filled: <qty> | <enteredTime>
+
+    Use this when you already have an orderId (e.g., from
+    get_brokerage_orders or from a fill notification) and want a single
+    crisp row rather than the full history list.
+
     Args:
-        order_id: The Schwab order ID.
+        order_id: The Schwab order ID as returned by get_brokerage_orders.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
@@ -872,11 +1011,33 @@ async def get_brokerage_transactions(
     transaction_types: str = "",
     npub: NpubField = "", proof: str = "",
 ) -> str | dict[str, Any]:
-    """Get transaction history for your Schwab account.
+    """Get transaction history for the active Schwab account.
+
+    Returns one markdown row per transaction:
+
+      - **<activityId>** [<type>] <tradeDate> | <qty>x <symbol> | <qty>x <symbol> ... |
+        Net: $<amount>
+
+    Symbols come from the transaction's transferItems collection (one item
+    per leg, e.g. equity bought + cash debit), with the per-leg amount as
+    quantity. When no transferItems have symbols, the row falls back to the
+    transaction's description text in place of the symbol list.
+
+    Date-window default — when from_date and to_date are both blank, the
+    tool defaults to the last 30 days (in UTC). Pass both or neither.
+
+    Schwab's transaction type enum (values you can pass to transaction_types):
+      TRADE, RECEIVE_AND_DELIVER, DIVIDEND_OR_INTEREST, ACH_RECEIPT,
+      ACH_DISBURSEMENT, CASH_RECEIPT, CASH_DISBURSEMENT, ELECTRONIC_FUND,
+      WIRE_OUT, WIRE_IN, JOURNAL, MEMORANDUM, MARGIN_CALL, MONEY_MARKET,
+      SMA_ADJUSTMENT. Empty string = all types.
+
     Args:
-        from_date: Start date (ISO 8601). Defaults to 30 days ago.
-        to_date: End date (ISO 8601). Defaults to now.
-        transaction_types: Comma-separated types: TRADE, DIVIDEND, CASH_IN_OR_CASH_OUT, etc.
+        from_date: Start of window, ISO 8601 (e.g. "2026-04-01T00:00:00.000Z").
+            Empty string defaults to 30 days ago.
+        to_date: End of window, ISO 8601. Empty string defaults to now.
+        transaction_types: Comma-separated Schwab transaction-type values.
+            Empty string = all types.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
@@ -898,9 +1059,19 @@ async def get_brokerage_transactions(
 async def get_brokerage_transaction(
     transaction_id: str, npub: NpubField = "", proof: str = "",
 ) -> str | dict[str, Any]:
-    """Get details for a single transaction by ID.
+    """Get full details for a single transaction by Schwab transaction ID.
+
+    Returns the same one-line markdown format as get_brokerage_transactions:
+
+      - **<activityId>** [<type>] <tradeDate> | <symbols/qtys> | Net: $<amount>
+
+    Use this when you have a specific transactionId (from
+    get_brokerage_transactions, a journal entry, or a confirmation) and want
+    the canonical row rather than scanning a history window.
+
     Args:
-        transaction_id: The Schwab transaction ID.
+        transaction_id: The Schwab transaction ID as returned by
+            get_brokerage_transactions (usually surfaced as `activityId`).
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
