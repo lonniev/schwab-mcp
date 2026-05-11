@@ -273,16 +273,33 @@ async def get_positions(client: SchwabClient, account_hash: str) -> str:
 
 
 async def get_account_balances(client: SchwabClient, account_hash: str) -> str:
-    """Get account summary: cash, buying power, net liquidation, day P&L."""
+    """Get account summary: cash, buying power, net liquidation, day P&L.
+
+    Day P&L is computed from Schwab's initialBalances vs currentBalances
+    snapshots (currentBalances.liquidationValue − initialBalances.liquidationValue).
+    Schwab's API does not expose a single "dayProfitLoss" field on the
+    account; the delta against the start-of-day snapshot is the canonical
+    session-P&L measure. When either snapshot is missing we report 0.0
+    rather than a misleading large number derived from a zero baseline.
+    """
     data = await client.get_account(account_hash)
 
-    balances = data.get("securitiesAccount", {}).get("currentBalances", {})
+    securities = data.get("securitiesAccount", {})
+    current = securities.get("currentBalances", {})
+    initial = securities.get("initialBalances", {})
+
+    current_liq = current.get("liquidationValue", 0.0)
+    initial_liq = initial.get("liquidationValue", 0.0)
+    # Only compute the delta when both snapshots are present (non-zero).
+    # If one is missing, treating zero as the baseline would print today's
+    # full equity as "Day P&L", which is the bug we are fixing.
+    day_pl = current_liq - initial_liq if current_liq and initial_liq else 0.0
 
     acct = AccountBalances(
-        cash_balance=balances.get("cashBalance", 0.0),
-        buying_power=balances.get("buyingPower", 0.0),
-        net_liquidation=balances.get("liquidationValue", 0.0),
-        day_pl=balances.get("dayTradingBuyingPower", 0.0),
+        cash_balance=current.get("cashBalance", 0.0),
+        buying_power=current.get("buyingPower", 0.0),
+        net_liquidation=current_liq,
+        day_pl=day_pl,
     )
 
     return (

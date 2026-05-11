@@ -612,19 +612,20 @@ async def get_brokerage_positions(npub: NpubField = "", proof: str = "") -> str 
 async def get_brokerage_balances(npub: NpubField = "", proof: str = "") -> str | dict[str, Any]:
     """Get the active Schwab account's current balance summary.
 
-    Pulls Schwab's account endpoint and returns four bold lines drawn from
-    securitiesAccount.currentBalances:
+    Pulls Schwab's account endpoint and returns four bold lines:
 
-      **Cash Balance:** cashBalance
-      **Buying Power:** buyingPower
-      **Net Liquidation:** liquidationValue
-      **Day P&L:** dayTradingBuyingPower
+      **Cash Balance:** currentBalances.cashBalance
+      **Buying Power:** currentBalances.buyingPower
+      **Net Liquidation:** currentBalances.liquidationValue
+      **Day P&L:** currentBalances.liquidationValue − initialBalances.liquidationValue
 
-    Note: the "Day P&L" label currently maps to Schwab's
-    dayTradingBuyingPower field, which is the buying power available for
-    day trading — not a session profit-and-loss figure. Use the raw value
-    as Schwab returns it; if you need true day P&L, compute it from
-    positions instead.
+    Day P&L is the session change in mark-to-market equity (the canonical
+    measure of "how much did I make/lose today"). Schwab's account
+    response does not expose a single "dayProfitLoss" field — the
+    convention is to compute the delta against the start-of-day snapshot.
+    When either snapshot is missing, Day P&L reports 0.0 rather than
+    treating zero as the baseline (which would print today's full equity
+    as P&L).
 
     Args:
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.

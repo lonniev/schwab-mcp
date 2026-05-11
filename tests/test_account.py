@@ -103,15 +103,18 @@ async def test_get_positions_no_positions_key():
 
 
 async def test_get_account_balances():
-    """Balances are parsed into readable format."""
+    """Balances are parsed into readable format and Day P&L is computed
+    as currentBalances.liquidationValue − initialBalances.liquidationValue."""
     data = {
         "securitiesAccount": {
+            "initialBalances": {
+                "liquidationValue": 49500.0,
+            },
             "currentBalances": {
                 "cashBalance": 10000.0,
                 "buyingPower": 20000.0,
                 "liquidationValue": 50000.0,
-                "dayTradingBuyingPower": 150.0,
-            }
+            },
         }
     }
     client = _mock_client(data)
@@ -120,6 +123,29 @@ async def test_get_account_balances():
     assert "10,000.00" in result
     assert "20,000.00" in result
     assert "50,000.00" in result
+    # Day P&L = 50000 − 49500 = 500.00 (positive session change).
+    assert "**Day P&L:** $500.00" in result
+
+
+async def test_get_account_balances_missing_initial_snapshot():
+    """When initialBalances is absent (Schwab returns only currentBalances),
+    Day P&L falls back to 0.0 rather than treating zero as the start-of-day
+    baseline and printing today's full equity as P&L."""
+    data = {
+        "securitiesAccount": {
+            "currentBalances": {
+                "cashBalance": 10000.0,
+                "buyingPower": 20000.0,
+                "liquidationValue": 50000.0,
+            }
+        }
+    }
+    client = _mock_client(data)
+    result = await get_account_balances(client, "FAKE_HASH")
+
+    assert "**Day P&L:** $0.00" in result
+    # The 50,000 net liquidation MUST NOT bleed into the Day P&L line.
+    assert "**Day P&L:** $50,000.00" not in result
 
 
 # ---------------------------------------------------------------------------
