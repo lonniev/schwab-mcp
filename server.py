@@ -603,8 +603,26 @@ async def get_stock_quote(
     symbols: str, npub: NpubField = "", proof: str = "",
 ) -> str | dict[str, Any]:
     """Get real-time quotes for one or more symbols.
+
+    Returns one markdown line per symbol with these fields:
+      - Last:  intraday last-trade price.
+      - Bid / Ask:  current best quote.
+      - Vol:  cumulative session volume.
+      - Chg:  Schwab's netPercentChange — session percent change vs prior close
+              (not a tick-by-tick delta).
+      - 52wk:  52-week low / 52-week high reference range.
+
+    Symbology conventions (Schwab API — quietly enforced):
+      - Equities and ETFs use bare tickers: AAPL, MSFT, XOM, GDX.
+      - Indices require a $-prefix: $SPX (S&P 500), $DJI (Dow), $COMPX (Nasdaq
+        Composite), $VIX (CBOE Volatility Index). The .X suffix (e.g. SPX.X) is
+        NOT supported and will return an empty quote.
+      - Mixing styles in a single call is fine: "AAPL,$SPX,$VIX".
+
     Args:
-        symbols: Comma-separated ticker symbols (e.g. "AAPL,MSFT,TSLA").
+        symbols: Comma-separated ticker symbols (e.g. "AAPL,MSFT,$SPX").
+            Each symbol is uppercased before lookup; whitespace around commas
+            is tolerated. Symbols Schwab cannot resolve are silently omitted.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
@@ -624,12 +642,47 @@ async def get_option_chain(
     days_to_expiration: int = 21,
     npub: NpubField = "", proof: str = "",
 ) -> str | dict[str, Any]:
-    """Get filtered option chain for spread evaluation.
+    """Get a filtered option chain suitable for spread evaluation.
+
+    Returns a markdown table of surviving contracts with one row per leg.
+    Header line carries the underlying price and the active filter constants.
+
+    Columns:
+      Exp | DTE | P/C | Strike | OTM% | Bid | Ask | Last | Vol | OI | IV | Delta | Theta
+
+    ATM strikes (within 1% of the underlying) are marked with a trailing "*"
+    in the Strike column. Rows are sorted by (expiration, put/call, strike).
+
+    Server-side filters applied BEFORE the table is built — strikes failing
+    a filter are silently dropped (not flagged as missing):
+      - Open interest: hardcoded at OI >= 25 per contract. Zero-OI strikes
+        and any below the threshold are excluded. This is NOT a parameter;
+        the constant lives in tools/options.py.
+      - Days to expiration: ceiling enforced via the days_to_expiration
+        argument. Expirations beyond that horizon are excluded.
+
+    Parameter semantics worth knowing:
+      - strike_count: passed to Schwab as strikeCount. Schwab returns approximately
+        this many strikes centered around the at-the-money strike (so 20 means
+        roughly 10 below + 10 above ATM; exact centering is Schwab's call).
+        After the OI filter, the visible count is typically lower.
+      - contract_type: "ALL" returns both legs; "CALL" or "PUT" returns only
+        that side.
+
+    Failure modes worth distinguishing:
+      - "No option contracts found ... within K DTE with OI >= 25" — the chain
+        exists but every strike in the requested window failed the OI filter.
+        Bump strike_count first (widens the strike band), then days_to_expiration
+        (extends the horizon).
+      - An error response — the underlying symbol failed to resolve.
+
     Args:
-        symbol: Underlying ticker symbol.
-        strike_count: Number of strikes around ATM to include.
+        symbol: Underlying ticker (equity or ETF). For index options use the
+            $-prefix form: $SPX, $NDX, $RUT.
+        strike_count: Approximate total strikes returned, centered on ATM
+            (default 20).
         contract_type: "ALL", "CALL", or "PUT".
-        days_to_expiration: Maximum days to expiration to include.
+        days_to_expiration: Maximum days to expiration to include (default 21).
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
@@ -679,11 +732,33 @@ async def get_market_movers(
     frequency: int = 0,
     npub: NpubField = "", proof: str = "",
 ) -> str | dict[str, Any]:
-    """Get top movers for a market index.
+    """Get top movers for a market index — Schwab's curated mover screener.
+
+    Returns up to 20 rows (capped server-side here, not by Schwab) in a
+    markdown table.
+
+    Columns:
+      Symbol | Description | Change % | Volume | Last
+
+    Behavior worth knowing before reading the result:
+      - The Volume column carries Schwab's AGGREGATE INDEX VOLUME — the same
+        value appears in every row, not per-symbol volume. To get a symbol's
+        own volume, call get_stock_quote on that symbol.
+      - The symbol list is curated by Schwab's mover-detection algorithm, not
+        a simple top-N sort of the index's constituents. Symbols not flagged
+        as movers will be absent regardless of their actual change%, and you
+        cannot reproduce the list by sorting the whole index yourself.
+      - The sort parameter influences which direction of movement Schwab
+        surfaces, but the returned rows are not strictly ordered by that
+        field — treat row order as Schwab's recommendation, not a sort key.
+
     Args:
-        index: Index symbol -- "$DJI", "$COMPX", or "$SPX".
+        index: Index symbol. Schwab's movers endpoint supports only "$SPX",
+            "$DJI", and "$COMPX". Other indices ($VIX, $NDX, $RUT, sector
+            ETFs) are not supported and will return an empty list.
         sort: "PERCENT_CHANGE_UP", "PERCENT_CHANGE_DOWN", or "VOLUME".
-        frequency: 0 = all, 1 = 1-5%, 2 = 5-10%, 3 = 10-20%, 4 = 20%+.
+        frequency: Movement-magnitude band filter.
+            0 = all bands, 1 = 1–5%, 2 = 5–10%, 3 = 10–20%, 4 = 20%+.
         npub: Your DPYC patron Nostr public key (npub1...) for credit attribution.
     """
     session = await _require_session(npub)
