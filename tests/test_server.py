@@ -362,3 +362,92 @@ class TestToolRegistry:
 
         assert self._by_capability(TOOL_REGISTRY, "get_option_chain").category == "heavy"
         assert self._by_capability(TOOL_REGISTRY, "get_price_history").category == "heavy"
+
+
+class TestGetAccountNumbersProofGate:
+    """get_account_numbers is proof-gated to close the IDOR — anyone who
+    knew a patron's public npub could otherwise fetch that patron's Schwab
+    account hashes by passing the npub to this free tool."""
+
+    @pytest.mark.asyncio
+    async def test_missing_npub_returns_npub_missing(self):
+        """No npub → wheel's npub_validation_error envelope before any
+        Schwab API call."""
+        import server as srv
+
+        result = await srv.get_account_numbers(npub="", proof="any")
+        assert isinstance(result, dict)
+        assert result["error_code"] == "npub_missing"
+
+    @pytest.mark.asyncio
+    async def test_malformed_npub_returns_npub_invalid(self):
+        import server as srv
+
+        result = await srv.get_account_numbers(npub="not-an-npub", proof="any")
+        assert isinstance(result, dict)
+        assert result["error_code"] == "npub_invalid"
+
+    @pytest.mark.asyncio
+    async def test_missing_proof_returns_proof_missing(self):
+        """Valid npub but no proof → wheel's proof_validation_error envelope.
+        Stops the lookup before any OAuth session restoration."""
+        import server as srv
+
+        result = await srv.get_account_numbers(npub=VALID_NPUB, proof="")
+        assert isinstance(result, dict)
+        assert result["error_code"] == "proof_missing"
+
+    @pytest.mark.asyncio
+    async def test_invalid_proof_returns_proof_invalid(self):
+        """Non-empty but bogus proof → cryptographic verify_proof fails →
+        proof_invalid envelope. Patron cannot bypass the IDOR fix by
+        sending an unverified string."""
+        import server as srv
+
+        with patch("tollbooth.identity_proof.verify_proof", return_value=False):
+            result = await srv.get_account_numbers(
+                npub=VALID_NPUB, proof="garbage-token"
+            )
+
+        assert isinstance(result, dict)
+        assert result["error_code"] == "proof_invalid"
+
+    @pytest.mark.asyncio
+    async def test_valid_proof_proceeds_to_oauth_session_lookup(self):
+        """Once the proof verifies, the tool proceeds normally — confirmed
+        by observing that restore_oauth_session is called. We intercept it
+        before the upstream Schwab HTTP call to keep the test offline."""
+        import server as srv
+
+        restore_mock = AsyncMock(return_value=(None, "token_expired"))
+
+        with (
+            patch("tollbooth.identity_proof.verify_proof", return_value=True),
+            patch.object(srv.runtime, "restore_oauth_session", new=restore_mock),
+        ):
+            result = await srv.get_account_numbers(
+                npub=VALID_NPUB, proof="valid-token"
+            )
+
+        restore_mock.assert_called_once_with(VALID_NPUB)
+        # The mocked restore returns token_expired — proof check passed,
+        # we just stopped before the upstream Schwab call.
+        assert result["error_code"] == "oauth_token_expired"
+
+    @pytest.mark.asyncio
+    async def test_proof_binding_uses_get_account_numbers_capability(self):
+        """The tool_name argument to verify_proof must be the capability
+        string — a proof issued for one tool cannot be replayed against
+        get_account_numbers."""
+        import server as srv
+
+        with (
+            patch("tollbooth.identity_proof.verify_proof", return_value=True) as vp,
+            patch.object(
+                srv.runtime, "restore_oauth_session",
+                new=AsyncMock(return_value=(None, "token_expired")),
+            ),
+        ):
+            await srv.get_account_numbers(npub=VALID_NPUB, proof="tok")
+
+        vp.assert_called_once_with("tok", VALID_NPUB, "get_account_numbers")
