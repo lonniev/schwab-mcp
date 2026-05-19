@@ -17,7 +17,6 @@ from tollbooth.credential_templates import CredentialTemplate, FieldSpec
 from tollbooth.credential_validators import validate_btcpay_creds, validate_required
 from tollbooth.oauth_config import OAuthProviderConfig
 from tollbooth.runtime import OperatorRuntime, register_standard_tools
-from tollbooth.slug_tools import make_slug_tool
 from tollbooth.tool_identity import STANDARD_IDENTITIES, ToolIdentity, capability_uuid
 
 logger = logging.getLogger(__name__)
@@ -61,7 +60,6 @@ mcp = FastMCP(
         "`get_transactions`, and `get_transaction`. Default lookback is 30 days."
     ),
 )
-tool = make_slug_tool(mcp, "schwab")
 
 # ---------------------------------------------------------------------------
 # Onboarding guidance for AI agents (no pricing-studio needed)
@@ -276,7 +274,7 @@ def _get_version() -> str:
         return "unknown"
 
 
-register_standard_tools(
+tool = register_standard_tools(
     mcp,
     "schwab",
     runtime,
