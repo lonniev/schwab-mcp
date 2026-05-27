@@ -96,73 +96,102 @@ _ONBOARDING_NEXT_STEPS = {
 # Tool registry (domain tools only — standard tools are in the wheel)
 # ---------------------------------------------------------------------------
 
+# Frozen UUIDs — declared once at tool birth and never changed.
+GET_ACCOUNT_NUMBERS_UUID         = "133b9f57-3082-53e2-99c8-109a038b7d61"
+GET_BROKERAGE_POSITIONS_UUID     = "eddb19c2-ffe7-5d20-b9ee-831fcf4745ad"
+GET_BROKERAGE_BALANCES_UUID      = "44bb662f-8d80-531c-8060-97f551fb11ca"
+GET_STOCK_QUOTE_UUID             = "0293e78f-ecd2-5b86-8484-7ec837c109bf"
+GET_MARKET_MOVERS_UUID           = "dda3d486-dfba-57c9-9a86-59bcb7c49bf7"
+GET_MARKET_HOURS_UUID            = "1579030a-5d13-5972-95ea-eeec030885f6"
+SEARCH_INSTRUMENTS_UUID          = "2430f7f1-ea08-517a-888c-855fdf4bcf24"
+GET_OPTION_CHAIN_UUID            = "8a932c96-f71f-5528-9acf-1398eec43db5"
+GET_PRICE_HISTORY_UUID           = "0a416f4b-aea2-528d-9827-5206fb04c843"
+GET_BROKERAGE_ORDERS_UUID        = "76dc69b1-d932-502b-9d4d-f6b4273ef8e3"
+GET_BROKERAGE_ORDER_UUID         = "288a7b02-3c3e-5887-95f9-28892d454a61"
+GET_BROKERAGE_TRANSACTIONS_UUID  = "4f2e1cfe-1036-57b6-af4c-a2349086a950"
+GET_BROKERAGE_TRANSACTION_UUID   = "2f2e3c97-7560-5373-80be-aa88ac3a8182"
+
+
 _DOMAIN_TOOLS = [
     # OAuth tools are now standard (from wheel via OAuthProviderConfig)
     # Free — account discovery (no account_hash needed)
     ToolIdentity(
+        tool_id=GET_ACCOUNT_NUMBERS_UUID,
         capability="get_account_numbers",
         category="free",
         intent="List Schwab account numbers and hash identifiers.",
     ),
     # Paid — write tier (brokerage reads)
     ToolIdentity(
+        tool_id=GET_BROKERAGE_POSITIONS_UUID,
         capability="get_brokerage_positions",
         category="write",
         intent="Get positions for a Schwab brokerage account.",
     ),
     ToolIdentity(
+        tool_id=GET_BROKERAGE_BALANCES_UUID,
         capability="get_brokerage_balances",
         category="write",
         intent="Get account balances for a Schwab brokerage account.",
     ),
     ToolIdentity(
+        tool_id=GET_STOCK_QUOTE_UUID,
         capability="get_stock_quote",
         category="write",
         intent="Get real-time quotes for one or more ticker symbols.",
     ),
     ToolIdentity(
+        tool_id=GET_MARKET_MOVERS_UUID,
         capability="get_market_movers",
         category="write",
         intent="Get top movers for a market index.",
     ),
     ToolIdentity(
+        tool_id=GET_MARKET_HOURS_UUID,
         capability="get_market_hours",
         category="write",
         intent="Get trading hours for equity, option, and other markets.",
     ),
     ToolIdentity(
+        tool_id=SEARCH_INSTRUMENTS_UUID,
         capability="search_instruments",
         category="write",
         intent="Search for instruments by symbol, name, or CUSIP.",
     ),
     # Paid — heavy tier (complex data retrieval)
     ToolIdentity(
+        tool_id=GET_OPTION_CHAIN_UUID,
         capability="get_option_chain",
         category="heavy",
         intent="Get filtered option chain for spread evaluation.",
     ),
     ToolIdentity(
+        tool_id=GET_PRICE_HISTORY_UUID,
         capability="get_price_history",
         category="heavy",
         intent="Get historical OHLCV price data for trend analysis.",
     ),
     # Paid — heavy tier (multi-record history scans)
     ToolIdentity(
+        tool_id=GET_BROKERAGE_ORDERS_UUID,
         capability="get_brokerage_orders",
         category="heavy",
         intent="Get order history for a Schwab brokerage account.",
     ),
     ToolIdentity(
+        tool_id=GET_BROKERAGE_ORDER_UUID,
         capability="get_brokerage_order",
         category="heavy",
         intent="Get details for a single order by ID.",
     ),
     ToolIdentity(
+        tool_id=GET_BROKERAGE_TRANSACTIONS_UUID,
         capability="get_brokerage_transactions",
         category="heavy",
         intent="Get transaction history for a Schwab brokerage account.",
     ),
     ToolIdentity(
+        tool_id=GET_BROKERAGE_TRANSACTION_UUID,
         capability="get_brokerage_transaction",
         category="heavy",
         intent="Get details for a single transaction by ID.",
