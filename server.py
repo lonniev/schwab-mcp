@@ -382,7 +382,8 @@ _SCHWAB_SITUATIONS: dict[str, dict[str, Any]] = {
         ),
         "next_steps": [
             "schwab_get_account_numbers(npub=<patron_npub>) to list your accounts",
-            'schwab_update_patron_credential(npub=<patron_npub>, field="account_hash", value=<hash>) to record your choice',
+            'schwab_update_patron_credential(npub=<patron_npub>, '
+            'field="account_hash", value=<hash>) to record your choice',
             "Retry the original tool call — selection persists across operator restarts",
         ],
     },
@@ -574,7 +575,8 @@ async def get_account_numbers(npub: NpubField = "", proof: str = "") -> str | di
         return {
             "success": False,
             "error_code": "proof_invalid",
-            "error": "Invalid or expired proof for npub. Re-run request_npub_proof + receive_npub_proof.",
+            "error": "Invalid or expired proof for npub. "
+                     "Re-run request_npub_proof + receive_npub_proof.",
         }
 
     # Need OAuth tokens but NOT account_hash
