@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Diagnostic: simulate the actual cold-start flow end-to-end.
 
-Tests whether courier.receive() → callback → _operator_credentials works.
+Tests whether receive_from_vault() → callback → _operator_credentials works.
 """
 
 from __future__ import annotations
@@ -32,8 +32,11 @@ async def main() -> None:
         print(f"  FAILED: {e}")
         print(f"  _operator_credentials after: {server._operator_credentials}")
 
-        # Try manual courier.receive() to see what the callback gets
-        print("\n=== Manual courier.receive() ===")
+        # Try the vault-only read to see what cold-start restore gets.
+        # Since wheel 0.44.0, the relay drain (courier.receive) is strict and
+        # poison-scoped; cold-start session restore reads from the vault via
+        # receive_from_vault (no poison, no relay I/O).
+        print("\n=== Manual receive_from_vault() ===")
         try:
             from pynostr.key import PrivateKey
             settings = server._get_settings()
@@ -41,10 +44,10 @@ async def main() -> None:
             operator_npub = pk.public_key.bech32()
 
             courier = server._get_courier_service()
-            result = await courier.receive(
+            result = await courier._exchange.receive_from_vault(
                 operator_npub, service="schwab-operator",
             )
-            print(f"  courier.receive() result keys: {list(result.keys())}")
+            print(f"  receive_from_vault() result keys: {list(result.keys())}")
             print(f"  success: {result.get('success')}")
             print(f"  callback_error: {result.get('callback_error')}")
             print(f"  operator_credentials_vaulted: "
@@ -54,7 +57,7 @@ async def main() -> None:
             print(f"  _operator_credentials after: "
                   f"{server._operator_credentials}")
         except Exception as exc:
-            print(f"  courier.receive() failed: {exc}")
+            print(f"  receive_from_vault() failed: {exc}")
 
 
 if __name__ == "__main__":
