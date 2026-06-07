@@ -43,7 +43,8 @@ mcp = FastMCP(
         "recipient_npub=<operator_npub>)`\n"
         '   - Reply with JSON: `{"app_key": "...", "secret": "..."}`\n'
         "   - Call `receive_credentials(sender_npub=<operator_npub>, "
-        'service="schwab-operator")`\n\n'
+        'service="schwab-operator", poison=<session phrase from the welcome DM>)`'
+        " — all three are required\n\n"
         "3. **Patron onboarding** (per-user):\n"
         "   - Call `begin_oauth(npub=<your_npub>)` to get an authorization URL\n"
         "   - Open the URL in your browser and log in to Schwab\n"
