@@ -294,12 +294,20 @@ Free tools are always available:
 
 | Resource | Description |
 |----------|-------------|
-| [dpyc-community](https://github.com/lonniev/dpyc-community) | Community registry, governance, creed, and trademarks |
-| [tollbooth-dpyc](https://github.com/lonniev/tollbooth-dpyc) | Operator SDK -- Python library for Tollbooth DPYC&trade; monetization |
-| [tollbooth-authority](https://github.com/lonniev/tollbooth-authority) | Authority MCP service -- fee collection, Schnorr signing, purchase order certification |
-| [thebrain-mcp](https://github.com/lonniev/thebrain-mcp) | Personal Brain MCP service -- the first city on the Lightning Turnpike |
+| [tollbooth-dpyc](https://github.com/lonniev/tollbooth-dpyc) | Operator SDK -- Python library for vault, auth, pricing, Lightning, and Nostr identity |
+| [dpyc-community](https://github.com/lonniev/dpyc-community) | Governance registry -- membership, advisories, threat model, creed, and trademarks |
+| [dpyc-oracle](https://github.com/lonniev/dpyc-oracle) | Community concierge -- free onboarding and member lookup |
+| [tollbooth-authority](https://github.com/lonniev/tollbooth-authority) | Certification backbone -- Schnorr-signed certificates and fee collection |
+| [tollbooth-sample](https://github.com/lonniev/tollbooth-sample) | Sample Operator -- canonical template for new MCP services |
+| [tollbooth-pricing-studio](https://github.com/lonniev/tollbooth-pricing-studio) | iOS pricing-model editor and operator console |
+| [cypher-mcp](https://github.com/lonniev/cypher-mcp) | Monetized graph answers -- named Cypher templates over Neo4j/AuraDB |
+| [schwab-mcp](https://github.com/lonniev/schwab-mcp) | Charles Schwab brokerage data |
+| [thebrain-mcp](https://github.com/lonniev/thebrain-mcp) | TheBrain personal knowledge graph |
 | [excalibur-mcp](https://github.com/lonniev/excalibur-mcp) | X (Twitter) posting service with Secure Courier |
-| [dpyc-oracle](https://github.com/lonniev/dpyc-oracle) | Community concierge -- free membership, governance, and onboarding tools |
+| [taxsort-mcp](https://github.com/lonniev/taxsort-mcp) | Tax classification with a Cloudflare Pages UI |
+| [optionality-mcp](https://github.com/lonniev/optionality-mcp) | Options analytics (brokerage-data operator) |
+| [tollbooth-oauth2-collector](https://github.com/lonniev/tollbooth-oauth2-collector) | OAuth2 callback handler (advocate service) |
+| [tollbooth-shortlinks](https://github.com/lonniev/tollbooth-shortlinks) | URL shortener utility |
 | [DPYC Whitepaper](https://github.com/lonniev/dpyc-community/blob/main/docs/WHITEPAPER.md) | Technical whitepaper for the Tollbooth architecture |
 | [The Phantom Tollbooth on the Lightning Turnpike](https://stablecoin.myshopify.com/blogs/our-value/the-phantom-tollbooth-on-the-lightning-turnpike) | Narrative introduction to Tollbooth DPYC&trade; |
 

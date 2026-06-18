@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+- chore: track tollbooth-dpyc through 0.45.4 — SDK pin bumps (0.45.2, 0.45.3, 0.45.4). Picks up the wheel's deferred-adoption courtship and the refund-on-raise correctness fix (paid_tool surfaces a tool's `ValueError` as `tool_input_invalid` and refunds the debit). No wire-API changes to this server; README ecosystem table refreshed to the full DPYC peer roster.
+
 ## [0.11.1] — 2026-06-11
 - chore: track tollbooth-dpyc through 0.44.15 — SDK audit hardening (correctness fixes for credit-tranche expiration in 0.44.9 and proof-reply handling in 0.44.10; blocking mypy + coverage gates). No wire-API changes.
 
