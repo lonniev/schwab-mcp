@@ -72,7 +72,7 @@ subscription nag screens, and KYC friction.
    credits are automatically rolled back via a compensating tranche. The
    user never pays for a failed call.
 
-6. **Honor Chain** -- The DPYC&trade; ecosystem is a voluntary community:
+6. **Social Contract** -- The DPYC&trade; ecosystem is a voluntary community:
    - **Citizens** -- Users who consume API services
    - **Operators** -- Developers who run MCP services (like this one)
    - **Authorities** -- Certify operators and collect a small tax on purchases
