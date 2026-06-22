@@ -297,11 +297,25 @@ runtime = OperatorRuntime(
 # ---------------------------------------------------------------------------
 
 def _get_version() -> str:
+    """Single source of truth: pyproject [project].version. Installed metadata
+    first, falling back to the source pyproject.toml for from-checkout deploys
+    (FastMCP Cloud runs flat py-modules apps without installing them)."""
+    from importlib.metadata import PackageNotFoundError, version
     try:
-        import importlib.metadata
-        return importlib.metadata.version("schwab-mcp")
+        return version("schwab-mcp")
+    except PackageNotFoundError:
+        pass
+    try:
+        import tomllib
+        from pathlib import Path
+        for parent in (Path(__file__).resolve().parent, *Path(__file__).resolve().parents):
+            pp = parent / "pyproject.toml"
+            if pp.is_file():
+                with pp.open("rb") as fh:
+                    return tomllib.load(fh)["project"]["version"]
     except Exception:
-        return "unknown"
+        pass
+    return "0.0.0"
 
 
 tool = register_standard_tools(
