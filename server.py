@@ -18,6 +18,7 @@ from tollbooth.credential_validators import validate_btcpay_creds, validate_requ
 from tollbooth.oauth_config import OAuthProviderConfig
 from tollbooth.runtime import OperatorRuntime, register_standard_tools
 from tollbooth.tool_identity import STANDARD_IDENTITIES, ToolIdentity, capability_uuid
+from tollbooth.version import resolve_service_version
 
 logger = logging.getLogger(__name__)
 
@@ -296,34 +297,12 @@ runtime = OperatorRuntime(
 # Register all standard DPYC tools from the wheel
 # ---------------------------------------------------------------------------
 
-def _get_version() -> str:
-    """Single source of truth: pyproject [project].version. Installed metadata
-    first, falling back to the source pyproject.toml for from-checkout deploys
-    (FastMCP Cloud runs flat py-modules apps without installing them)."""
-    from importlib.metadata import PackageNotFoundError, version
-    try:
-        return version("schwab-mcp")
-    except PackageNotFoundError:
-        pass
-    try:
-        import tomllib
-        from pathlib import Path
-        for parent in (Path(__file__).resolve().parent, *Path(__file__).resolve().parents):
-            pp = parent / "pyproject.toml"
-            if pp.is_file():
-                with pp.open("rb") as fh:
-                    return tomllib.load(fh)["project"]["version"]
-    except Exception:
-        pass
-    return "0.0.0"
-
-
 tool = register_standard_tools(
     mcp,
     "schwab",
     runtime,
     service_name="schwab-mcp",
-    service_version=_get_version(),
+    service_version=resolve_service_version("schwab-mcp", __file__),
 )
 
 
