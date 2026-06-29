@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.12.0] — 2026-06-29
+- **BREAKING: the identity-proof parameter is now `dpop_token` (was `proof`)** on every tool that took it — `get_account_numbers`, `get_brokerage_positions/balances`, `get_stock_quote`, `get_option_chain`, `get_price_history`, `get_brokerage_orders/order`, `get_brokerage_transactions/transaction`, `get_market_hours`, `get_market_movers`, `search_instruments`. Tracks tollbooth-dpyc **0.57.0**, which unifies the Secure Courier possession token under one name (`dpop_token`) across the proof and credential flows. The `paid_tool` decorator now reads `kwargs["dpop_token"]`, so this rename ships **in lockstep** with the wheel — pass `dpop_token=` where you previously passed `proof=`. No compat shim.
+- **Returning-session guidance** added to the MCP instructions: don't pre-emptively `begin_oauth`; attempt the live call and re-authorize only on an explicit `upstream_auth_refresh_needed`.
+- Picks up the wheel's free `patron_auth` block in `service_status` (reports `mode: "oauth"`, `patron_credentials_required: false` for Schwab) and the proof-vs-credential flow cross-references, so an agent can tell the two Secure-Courier flows apart on sight.
+
 ## [Unreleased]
 - chore: track tollbooth-dpyc through 0.45.4 — SDK pin bumps (0.45.2, 0.45.3, 0.45.4). Picks up the wheel's deferred-adoption courtship and the refund-on-raise correctness fix (paid_tool surfaces a tool's `ValueError` as `tool_input_invalid` and refunds the debit). No wire-API changes to this server; README ecosystem table refreshed to the full DPYC peer roster.
 

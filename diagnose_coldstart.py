@@ -34,8 +34,8 @@ async def main() -> None:
 
         # Try the vault-only read to see what cold-start restore gets.
         # Since wheel 0.44.0, the relay drain (courier.receive) is strict and
-        # poison-scoped; cold-start session restore reads from the vault via
-        # receive_from_vault (no poison, no relay I/O).
+        # dpop_token-scoped; cold-start session restore reads from the vault via
+        # receive_from_vault (no dpop_token, no relay I/O).
         print("\n=== Manual receive_from_vault() ===")
         try:
             from pynostr.key import PrivateKey

@@ -375,7 +375,7 @@ class TestGetAccountNumbersProofGate:
         Schwab API call."""
         import server as srv
 
-        result = await srv.get_account_numbers(npub="", proof="any")
+        result = await srv.get_account_numbers(npub="", dpop_token="any")
         assert isinstance(result, dict)
         assert result["error_code"] == "npub_missing"
 
@@ -383,7 +383,7 @@ class TestGetAccountNumbersProofGate:
     async def test_malformed_npub_returns_npub_invalid(self):
         import server as srv
 
-        result = await srv.get_account_numbers(npub="not-an-npub", proof="any")
+        result = await srv.get_account_numbers(npub="not-an-npub", dpop_token="any")
         assert isinstance(result, dict)
         assert result["error_code"] == "npub_invalid"
 
@@ -393,7 +393,7 @@ class TestGetAccountNumbersProofGate:
         Stops the lookup before any OAuth session restoration."""
         import server as srv
 
-        result = await srv.get_account_numbers(npub=VALID_NPUB, proof="")
+        result = await srv.get_account_numbers(npub=VALID_NPUB, dpop_token="")
         assert isinstance(result, dict)
         assert result["error_code"] == "proof_missing"
 
@@ -406,7 +406,7 @@ class TestGetAccountNumbersProofGate:
 
         with patch("tollbooth.identity_proof.verify_proof", return_value=False):
             result = await srv.get_account_numbers(
-                npub=VALID_NPUB, proof="garbage-token"
+                npub=VALID_NPUB, dpop_token="garbage-token"
             )
 
         assert isinstance(result, dict)
@@ -426,7 +426,7 @@ class TestGetAccountNumbersProofGate:
             patch.object(srv.runtime, "restore_oauth_session", new=restore_mock),
         ):
             result = await srv.get_account_numbers(
-                npub=VALID_NPUB, proof="valid-token"
+                npub=VALID_NPUB, dpop_token="valid-token"
             )
 
         restore_mock.assert_called_once_with(VALID_NPUB)
@@ -448,6 +448,6 @@ class TestGetAccountNumbersProofGate:
                 new=AsyncMock(return_value=(None, "token_expired")),
             ),
         ):
-            await srv.get_account_numbers(npub=VALID_NPUB, proof="tok")
+            await srv.get_account_numbers(npub=VALID_NPUB, dpop_token="tok")
 
         vp.assert_called_once_with("tok", VALID_NPUB, "get_account_numbers")
