@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.12.1] — 2026-07-09
+- chore: bump tollbooth-dpyc to **0.62.1** (security-hardening batch) — invoice-owner check on credit settlement, AES-256-GCM credential vault, encrypted self-provisioning ledger, and no plaintext audit broadcast. No wire-API changes to this server.
+
 ## [0.12.0] — 2026-06-29
 - **BREAKING: the identity-proof parameter is now `dpop_token` (was `proof`)** on every tool that took it — `get_account_numbers`, `get_brokerage_positions/balances`, `get_stock_quote`, `get_option_chain`, `get_price_history`, `get_brokerage_orders/order`, `get_brokerage_transactions/transaction`, `get_market_hours`, `get_market_movers`, `search_instruments`. Tracks tollbooth-dpyc **0.57.0**, which unifies the Secure Courier possession token under one name (`dpop_token`) across the proof and credential flows. The `paid_tool` decorator now reads `kwargs["dpop_token"]`, so this rename ships **in lockstep** with the wheel — pass `dpop_token=` where you previously passed `proof=`. No compat shim.
 - **Returning-session guidance** added to the MCP instructions: don't pre-emptively `begin_oauth`; attempt the live call and re-authorize only on an explicit `upstream_auth_refresh_needed`.
