@@ -1,0 +1,29 @@
+name: Diag App Token
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: issue number to poke
+        required: true
+        default: "49"
+permissions:
+  contents: read
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint scoped App token
+        id: token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.DPYC_BOT_APP_ID }}
+          private-key: ${{ secrets.DPYC_BOT_PRIVATE_KEY }}
+      - name: Try exactly what the Porter tries
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          N: ${{ github.event.inputs.issue }}
+        run: |
+          echo "== whoami =="; gh api user --jq '.login' 2>&1 || true
+          echo "== add-label =="; gh issue edit "$N" --repo ${{ github.repository }} --add-label type/question 2>&1; echo "EXIT=$?"
+          echo "== comment =="; gh issue comment "$N" --repo ${{ github.repository }} --body "app-token diagnostic (safe to ignore)" 2>&1; echo "EXIT=$?"
+          echo "== cleanup label =="; gh issue edit "$N" --repo ${{ github.repository }} --remove-label type/question 2>&1; echo "EXIT=$?"
