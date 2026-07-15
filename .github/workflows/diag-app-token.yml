@@ -9,7 +9,7 @@ on:
 permissions:
   contents: read
 jobs:
-  diag:
+  raw-token:
     runs-on: ubuntu-latest
     steps:
       - name: Mint scoped App token
@@ -18,12 +18,35 @@ jobs:
         with:
           app-id: ${{ secrets.DPYC_BOT_APP_ID }}
           private-key: ${{ secrets.DPYC_BOT_PRIVATE_KEY }}
-      - name: Try exactly what the Porter tries
+      - name: Raw gh write with the App token
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           N: ${{ github.event.inputs.issue }}
         run: |
-          echo "== whoami =="; gh api user --jq '.login' 2>&1 || true
-          echo "== add-label =="; gh issue edit "$N" --repo ${{ github.repository }} --add-label type/question 2>&1; echo "EXIT=$?"
-          echo "== comment =="; gh issue comment "$N" --repo ${{ github.repository }} --body "app-token diagnostic (safe to ignore)" 2>&1; echo "EXIT=$?"
-          echo "== cleanup label =="; gh issue edit "$N" --repo ${{ github.repository }} --remove-label type/question 2>&1; echo "EXIT=$?"
+          echo "== add-label =="; gh issue edit "$N" --repo ${{ github.repository }} --add-label type/chore 2>&1; echo "EXIT=$?"
+          echo "== cleanup =="; gh issue edit "$N" --repo ${{ github.repository }} --remove-label type/chore 2>&1; echo "EXIT=$?"
+
+  agent-write:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mint scoped App token
+        id: token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.DPYC_BOT_APP_ID }}
+          private-key: ${{ secrets.DPYC_BOT_PRIVATE_KEY }}
+      - name: Ask the AGENT to do exactly one write
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ steps.token.outputs.token }}
+          prompt: |
+            Run exactly this one shell command and nothing else, then stop:
+            gh issue edit ${{ github.event.inputs.issue }} --repo ${{ github.repository }} --add-label type/question
+          claude_args: |
+            --model claude-sonnet-5
+            --max-turns 3
+            --allowedTools "Bash(gh issue edit:*)"
