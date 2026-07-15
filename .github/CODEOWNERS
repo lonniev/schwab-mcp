@@ -1,0 +1,7 @@
+# schwab-mcp handles real brokerage data, financial PII, and Schwab OAuth tokens.
+# Every code/config change requires @lonniev review (CODEOWNERS + branch protection);
+# the agentic Journeyman may open PRs but nothing lands on these paths without you.
+# Only tests and docs are uncovered, so path-gated auto-merge can land those.
+* @lonniev
+/tests/
+*.md
