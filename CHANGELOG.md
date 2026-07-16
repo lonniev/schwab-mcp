@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added — underlying price + short-strike distance in `## Spreads` rows (#64)
+
+- Each spread row now carries the authoritative decision inputs derived from the underlying's **live equity quote** (reliable), not the option combo mark: `Underlying`, `ShortDist` (signed $ and %), and an `ITM`/`OTM`/`ATM` flag for the short leg. `get_positions` batch-fetches the underlyings via `get_quotes` in one call — no more second `get_stock_quote` and manual arithmetic per leg.
+- Relabeled the combo-mark column `Current` → `EstClose (mark×100)` so it can't be misread as an underlying price or dollar P&L. Schwab's combo mark is unreliable for deep-ITM spreads (prints below intrinsic), so this value is explicitly framed as an estimated cost-to-close, never an authoritative exit price.
+- The quote fetch is **best-effort**: any failure (auth, network, malformed payload) degrades the new columns to `Underlying: n/a` and never breaks the rest of the positions output.
+
 ## 0.12.2 — 2026-07-16
 
 ### Changed — track tollbooth-dpyc 0.63.3

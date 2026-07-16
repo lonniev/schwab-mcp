@@ -26,8 +26,17 @@ class SpreadPosition(BaseModel):
     long_leg: OptionPosition
     credit_received: float
     max_loss: float
+    # current_value = est. cost to close = combo mark x 100. Schwab's combo
+    # mark is unreliable for deep-ITM spreads (prints below intrinsic), so this
+    # is surfaced as "EstClose" and never used as the authoritative exit price.
     current_value: float
     unrealized_pl: float
+    # Decision inputs derived from the underlying's live equity quote (reliable),
+    # not from the option combo mark. None when the quote is unavailable.
+    underlying_price: float | None = None
+    short_strike_distance: float | None = None  # underlying_price - short strike
+    short_strike_distance_pct: float | None = None
+    moneyness: Literal["ITM", "OTM", "ATM"] | None = None  # of the short leg
 
 
 class EquityPosition(BaseModel):

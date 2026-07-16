@@ -70,9 +70,11 @@ def _mock_positions_response():
     }
 
 
-def _mock_client(response_data: dict) -> AsyncMock:
+def _mock_client(response_data: dict, quotes: dict | None = None) -> AsyncMock:
     client = AsyncMock()
     client.get_account.return_value = response_data
+    # Default: no usable quote payload, so spread rows degrade to "Underlying: n/a".
+    client.get_quotes.return_value = quotes if quotes is not None else {}
     return client
 
 
@@ -86,6 +88,39 @@ async def test_get_positions_with_spread():
     assert "200.0" in result or "200.00" in result
     assert "197.5" in result or "197.50" in result
     assert "SPY" in result
+
+
+async def test_spread_row_relabels_current_as_estclose():
+    """The combo-mark column is surfaced as EstClose, never a bare 'Current'."""
+    client = _mock_client(_mock_positions_response())
+    result = await get_positions(client, "FAKE_HASH")
+
+    assert "EstClose (mark×100)" in result
+    assert "Current:" not in result
+
+
+async def test_spread_enriched_with_underlying_and_moneyness():
+    """A live equity quote adds underlying price, short-strike distance, and flag."""
+    # Short put strike 200; underlying at 195 => short leg is ITM (195 < 200).
+    quotes = {"AAPL": {"quote": {"lastPrice": 195.0}}}
+    client = _mock_client(_mock_positions_response(), quotes=quotes)
+    result = await get_positions(client, "FAKE_HASH")
+
+    assert "Underlying: $195.00" in result
+    assert "ShortDist: $-5.00" in result
+    assert "-2.6%" in result  # -5 / 195 * 100
+    assert "ITM" in result
+    client.get_quotes.assert_awaited_once()
+
+
+async def test_spread_degrades_when_quote_fetch_fails():
+    """A quote-fetch failure never breaks the positions output."""
+    client = _mock_client(_mock_positions_response())
+    client.get_quotes.side_effect = RuntimeError("market data down")
+    result = await get_positions(client, "FAKE_HASH")
+
+    assert "Bull Put Spread" in result
+    assert "Underlying: n/a" in result
 
 
 async def test_get_positions_empty():

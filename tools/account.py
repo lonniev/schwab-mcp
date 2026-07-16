@@ -112,14 +112,44 @@ def _compute_dte(expiration_str: str) -> int:
         return 0
 
 
+def _extract_last_price(quote: dict) -> float | None:
+    """Pull the reliable last equity price from a Schwab quote entry.
+
+    Mirrors the extraction in tools/market.py. Returns None when the quote
+    is missing or malformed, so callers can degrade gracefully.
+    """
+    if not isinstance(quote, dict):
+        return None
+    quote_data = quote.get("quote", {})
+    regular = quote.get("regular", {})
+    last = quote_data.get("lastPrice", regular.get("lastPrice"))
+    return last if isinstance(last, (int, float)) and last else None
+
+
+def _moneyness(put_call: str, underlying_price: float, short_strike: float) -> str:
+    """Classify the SHORT leg as ITM / OTM / ATM against the live underlying."""
+    if underlying_price == short_strike:
+        return "ATM"
+    if put_call == "PUT":
+        return "ITM" if underlying_price < short_strike else "OTM"
+    return "ITM" if underlying_price > short_strike else "OTM"
+
+
 def _detect_spreads(
     options: list[OptionPosition],
+    underlying_prices: dict[str, float | None] | None = None,
 ) -> tuple[list[SpreadPosition], list[OptionPosition]]:
     """Group option positions into spreads where possible.
 
     A spread is two options on the same underlying with the same expiration
     but different strikes, where one is short and one is long.
+
+    ``underlying_prices`` maps an underlying symbol to its live equity price
+    (from get_quotes). When a price is present, each spread is enriched with
+    the short-strike distance and moneyness — the authoritative decision
+    inputs — since Schwab's option combo mark is unreliable for deep-ITM legs.
     """
+    underlying_prices = underlying_prices or {}
     spreads: list[SpreadPosition] = []
     used: set[int] = set()
 
@@ -149,6 +179,17 @@ def _detect_spreads(
                 max_loss = width - credit
                 current_value = abs(short_leg.market_value) - abs(long_leg.market_value)
 
+                underlying_price = underlying_prices.get(a.underlying)
+                distance: float | None = None
+                distance_pct: float | None = None
+                moneyness: str | None = None
+                if underlying_price:
+                    distance = round(underlying_price - short_leg.strike, 2)
+                    distance_pct = round(distance / underlying_price * 100, 2)
+                    moneyness = _moneyness(
+                        short_leg.put_call, underlying_price, short_leg.strike
+                    )
+
                 spreads.append(
                     SpreadPosition(
                         underlying=a.underlying,
@@ -161,6 +202,12 @@ def _detect_spreads(
                         unrealized_pl=round(
                             short_leg.unrealized_pl + long_leg.unrealized_pl, 2
                         ),
+                        underlying_price=(
+                            round(underlying_price, 2) if underlying_price else None
+                        ),
+                        short_strike_distance=distance,
+                        short_strike_distance_pct=distance_pct,
+                        moneyness=moneyness,
                     )
                 )
                 used.add(i)
@@ -169,6 +216,27 @@ def _detect_spreads(
 
     remaining = [opt for i, opt in enumerate(options) if i not in used]
     return spreads, remaining
+
+
+async def _fetch_underlying_prices(
+    client: SchwabClient, options: list[OptionPosition]
+) -> dict[str, float | None]:
+    """Fetch live equity prices for the options' underlyings, best-effort.
+
+    Returns a symbol->price map. Any failure (auth, network, malformed
+    payload) degrades to an empty map so positions output never breaks — the
+    spread rows simply fall back to "Underlying: n/a".
+    """
+    symbols = sorted({o.underlying for o in options if o.underlying})
+    if not symbols:
+        return {}
+    try:
+        quotes = await client.get_quotes(symbols)
+    except Exception:
+        return {}
+    if not isinstance(quotes, dict):
+        return {}
+    return {sym: _extract_last_price(quotes.get(sym, {})) for sym in symbols}
 
 
 async def get_positions(client: SchwabClient, account_hash: str) -> str:
@@ -229,21 +297,31 @@ async def get_positions(client: SchwabClient, account_hash: str) -> str:
                 )
             )
 
-    spreads, remaining_options = _detect_spreads(options)
+    underlying_prices = await _fetch_underlying_prices(client, options)
+    spreads, remaining_options = _detect_spreads(options, underlying_prices)
 
     lines: list[str] = []
 
     if spreads:
         lines.append("## Spreads")
         for s in spreads:
+            if s.underlying_price is not None:
+                underlying_col = (
+                    f"Underlying: ${s.underlying_price:.2f} | "
+                    f"ShortDist: ${s.short_strike_distance:+.2f} "
+                    f"({s.short_strike_distance_pct:+.1f}%) {s.moneyness} | "
+                )
+            else:
+                underlying_col = "Underlying: n/a | "
             lines.append(
                 f"- **{s.underlying} {s.spread_type}** "
                 f"({s.short_leg.strike}/{s.long_leg.strike} "
                 f"{s.short_leg.put_call} exp {s.short_leg.expiration}, "
                 f"DTE {s.short_leg.dte}) | "
+                f"{underlying_col}"
                 f"Credit: ${s.credit_received:.2f} | "
                 f"Max Loss: ${s.max_loss:.2f} | "
-                f"Current: ${s.current_value:.2f} | "
+                f"EstClose (mark×100): ${s.current_value:.2f} | "
                 f"P&L: ${s.unrealized_pl:.2f}"
             )
 
