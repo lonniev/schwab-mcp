@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.12.2 — 2026-07-16
+
+### Changed — track tollbooth-dpyc 0.63.3
+
+- Bumped the pinned SDK to 0.63.3 (npub-proof challenge DM now stamps the request time). Also cuts a release for changes accumulated since the last tag.
+
 ## [0.12.1] — 2026-07-09
 - chore: bump tollbooth-dpyc to **0.62.1** (security-hardening batch) — invoice-owner check on credit settlement, AES-256-GCM credential vault, encrypted self-provisioning ledger, and no plaintext audit broadcast. No wire-API changes to this server.
 
@@ -196,7 +202,7 @@ Picks up the wheel's runtime-name + DRY pass:
 
 - feat: add movers, market hours, and instrument search tools (#28)
 - Merge pull request #27 from lonniev/docs/cloud-deployment-readme
-- docs: reframe setup as cloud deployment via FastMCP Cloud
+- docs: reframe setup as cloud deployment via Horizon
 - Merge pull request #26 from lonniev/docs/readme-polish-apache
 - docs: add hero banner image (options risk profile)
 - docs: Apache 2.0 license, Oxcart preference, DPYC trademarks, attribution
@@ -302,7 +308,7 @@ Picks up the wheel's runtime-name + DRY pass:
 - add a sample daily report graphic
 - feat: add movers, market hours, and instrument search tools (#28)
 - Merge pull request #27 from lonniev/docs/cloud-deployment-readme
-- docs: reframe setup as cloud deployment via FastMCP Cloud
+- docs: reframe setup as cloud deployment via Horizon
 - Merge pull request #26 from lonniev/docs/readme-polish-apache
 - docs: add hero banner image (options risk profile)
 - docs: Apache 2.0 license, Oxcart preference, DPYC trademarks, attribution
