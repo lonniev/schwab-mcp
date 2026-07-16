@@ -202,7 +202,7 @@ Picks up the wheel's runtime-name + DRY pass:
 
 - feat: add movers, market hours, and instrument search tools (#28)
 - Merge pull request #27 from lonniev/docs/cloud-deployment-readme
-- docs: reframe setup as cloud deployment via FastMCP Cloud
+- docs: reframe setup as cloud deployment via Horizon
 - Merge pull request #26 from lonniev/docs/readme-polish-apache
 - docs: add hero banner image (options risk profile)
 - docs: Apache 2.0 license, Oxcart preference, DPYC trademarks, attribution
@@ -308,7 +308,7 @@ Picks up the wheel's runtime-name + DRY pass:
 - add a sample daily report graphic
 - feat: add movers, market hours, and instrument search tools (#28)
 - Merge pull request #27 from lonniev/docs/cloud-deployment-readme
-- docs: reframe setup as cloud deployment via FastMCP Cloud
+- docs: reframe setup as cloud deployment via Horizon
 - Merge pull request #26 from lonniev/docs/readme-polish-apache
 - docs: add hero banner image (options risk profile)
 - docs: Apache 2.0 license, Oxcart preference, DPYC trademarks, attribution
