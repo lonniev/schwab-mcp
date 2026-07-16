@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.12.2 — 2026-07-16
+
+### Changed — track tollbooth-dpyc 0.63.3
+
+- Bumped the pinned SDK to 0.63.3 (npub-proof challenge DM now stamps the request time). Also cuts a release for changes accumulated since the last tag.
+
 ## [0.12.1] — 2026-07-09
 - chore: bump tollbooth-dpyc to **0.62.1** (security-hardening batch) — invoice-owner check on credit settlement, AES-256-GCM credential vault, encrypted self-provisioning ledger, and no plaintext audit broadcast. No wire-API changes to this server.
 
