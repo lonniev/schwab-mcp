@@ -26,7 +26,7 @@ Multi-tenant [MCP](https://modelcontextprotocol.io/) server exposing Charles Sch
 
 *Inspired by [The Phantom Tollbooth](https://en.wikipedia.org/wiki/The_Phantom_Tollbooth) by Norton Juster, illustrated by Jules Feiffer (1961).*
 
-**Version:** 0.10.0 &nbsp; ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
+**Version:** 0.12.2 &nbsp; ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
 
 ## The DPYC&trade; Economy
 
@@ -45,7 +45,7 @@ subscription nag screens, and KYC friction.
    (`npub`), not an email or password. One keypair per role, managed by the
    user. No account creation forms.
 
-3. **Poison-keyed proof** -- Every paid tool call requires a `proof`
+3. **Poison-keyed proof** -- Every paid tool call requires a `dpop_token`
    parameter carrying a poison phrase (e.g., `bold-hawk-42`) returned by
    `request_npub_proof` / `receive_npub_proof`. The calling application
    remembers this token and passes it on every subsequent call. The MCP
@@ -82,7 +82,7 @@ subscription nag screens, and KYC friction.
 
 ### Brokerage (paid -- credit-gated)
 
-All paid tools require `npub` and `proof` parameters for identity verification.
+All paid tools require `npub` and `dpop_token` parameters for identity verification.
 
 | Tool | Tier | Description |
 |------|------|-------------|
@@ -140,7 +140,7 @@ All brokerage tools are read-only. No orders are placed.
 - **Tollbooth DPYC&trade;**: pre-funded Lightning balances, Authority-certified purchase orders, NeonVault (Postgres) for ledger persistence
 - **Registry discovery**: OAuth2 collector URL resolved from DPYC&trade; registry at runtime (no `OAUTH_COLLECTOR_URL` env var needed)
 - **Credential validation**: operator credentials are validated at receive time -- `btcpay_host`, `app_key`, and `secret` must all be present before vaulting
-- **Poison-keyed proof**: all paid tools require a `proof` parameter -- a poison phrase from `request_npub_proof` / `receive_npub_proof` that the calling application remembers. The MCP stores only the hash. Survives restarts; patron-chosen TTL up to 7 days. Restricted tools (operator-only) still use kind-27235 Schnorr signatures.
+- **Poison-keyed proof**: all paid tools require a `dpop_token` parameter -- a poison phrase from `request_npub_proof` / `receive_npub_proof` that the calling application remembers. The MCP stores only the hash. Survives restarts; patron-chosen TTL up to 7 days. Restricted tools (operator-only) still use kind-27235 Schnorr signatures.
 
 ---
 
@@ -276,9 +276,9 @@ Free tools are always available:
 
 ## Troubleshooting
 
-**Cold start / first tool call fails:** The FastMCP Cloud runtime may cold-start on the first request. Retry the tool call inline -- the server warms up within a few seconds and the second call succeeds.
+**Cold start / first tool call fails:** The Horizon runtime may cold-start on the first request. Retry the tool call inline -- the server warms up within a few seconds and the second call succeeds.
 
-**"proof is required":** Call `request_npub_proof` followed by `receive_npub_proof` to prove npub ownership. The response includes a `proof_token` -- pass it as the `proof` parameter on every subsequent paid tool call. Duration is patron-chosen (up to 7 days). The proof survives MCP restarts.
+**"proof is required":** Call `request_npub_proof` followed by `receive_npub_proof` to prove npub ownership. The response includes a `proof_token` -- pass it as the `dpop_token` parameter on every subsequent paid tool call. Duration is patron-chosen (up to 7 days). The proof survives MCP restarts.
 
 **"Insufficient credit balance":** Call `purchase_credits` to top up. Use `check_balance` to see your current api_sats balance and `tranche_lifetime` expiry.
 
@@ -315,7 +315,7 @@ Free tools are always available:
 
 ## Deployment
 
-schwab-mcp runs on [FastMCP Cloud](https://www.fastmcp.cloud/). Any MCP client (Claude.ai, Claude Desktop, Cursor, your own agent) can connect:
+schwab-mcp runs on [Horizon](https://www.fastmcp.cloud/). Any MCP client (Claude.ai, Claude Desktop, Cursor, your own agent) can connect:
 
 ```
 https://www.fastmcp.cloud/server/lonniev/schwab-mcp
