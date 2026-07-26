@@ -11,7 +11,7 @@ These were called out in the original note as "requested changes" but landed in 
 
 - **Proof cache survives operator restart.** Replaced session-scoped cache with poison-keyed
   proof (`sha256(poison):npub`) persisted in Neon. The application holds raw poison; the MCP
-  stores only the hash. Survives unlimited FastMCP Cloud restart cycles. (See
+  stores only the hash. Survives unlimited Horizon restart cycles. (See
   `project_v01507_state` memory.)
 - **OAuth refresh-token flow is generic.** `OperatorRuntime.restore_oauth_session()` does
   load → refresh → persist. Both schwab-mcp and excalibur-mcp delegate to it.
@@ -174,7 +174,7 @@ fresh work. Run sequentially against a healthy operator.
    silent refresh fire? Record the response.
 6. After observed proof expiry, make a paid call without re-running
    `request_npub_proof` / `receive_npub_proof`. Record the response shape.
-7. Restart the operator (FastMCP Cloud cold start) and immediately retry. Confirm
+7. Restart the operator (Horizon cold start) and immediately retry. Confirm
    poison-keyed proof survival behaves as memory claims.
 
 The diagnostic flowchart (was step 3-4 in the original note) collapses once `error_code`
