@@ -34,6 +34,15 @@ jobs:
             done
           fi
 
+      # CI installs from pyproject.toml; Horizon builds with `uv sync --frozen`,
+      # which installs uv.lock VERBATIM. Nothing compared the two, so a pin bumped
+      # in pyproject with a stale lock goes green here and dies at deploy with a
+      # ModuleNotFoundError — as excalibur-mcp's did on 2026-07-31. This is the
+      # missing comparison.
+      - name: Lockfile matches pyproject
+        uses: astral-sh/setup-uv@v7
+      - run: uv lock --check
+
       - name: Install dependencies
         run: |
           pip install -e ".[dev]"
