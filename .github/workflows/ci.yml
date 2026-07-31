@@ -34,12 +34,26 @@ jobs:
             done
           fi
 
-      - name: Install dependencies
-        run: |
-          pip install -e ".[dev]"
+      - uses: astral-sh/setup-uv@v7
+
+      # Install from uv.lock — the SAME artifact Horizon builds from (its config
+      # reads `Dependencies: uv.lock` and runs `uv sync --frozen`), so CI tests
+      # byte-identical dependencies to the container rather than a second,
+      # independently-resolved set.
+      #
+      # `pip install -e ".[dev]"` resolved pyproject.toml instead. Two sources,
+      # never compared — which is how excalibur-mcp went green on 2026-07-31 with
+      # pyproject at tollbooth-dpyc 0.77.0 and its lock at 0.76.0, then failed
+      # three Horizon builds on `No module named 'tollbooth.oauth_situation'`.
+      # Schwab had the identical stale lock and would have followed it down.
+      #
+      # `--locked` also asserts the lock is up to date with pyproject, so drift
+      # fails pre-merge rather than at deploy.
+      - name: Install dependencies (the lockfile Horizon deploys)
+        run: uv sync --locked --extra dev
 
       - name: Lint
-        run: ruff check .
+        run: uv run ruff check .
 
       - name: Test
-        run: pytest tests/ -v
+        run: uv run pytest tests/ -v
