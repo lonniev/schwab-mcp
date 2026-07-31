@@ -16,6 +16,7 @@ from pydantic import Field
 from tollbooth.credential_templates import CredentialTemplate, FieldSpec
 from tollbooth.credential_validators import validate_btcpay_creds, validate_required
 from tollbooth.oauth_config import OAuthProviderConfig
+from tollbooth.oauth_situation import OAuthSituation
 from tollbooth.runtime import OperatorRuntime, register_standard_tools
 from tollbooth.tool_identity import STANDARD_IDENTITIES, ToolIdentity, capability_uuid
 from tollbooth.version import resolve_service_version
@@ -390,15 +391,16 @@ _SCHWAB_SITUATIONS: dict[str, dict[str, Any]] = {
 }
 
 
-def _resolution_for(situation: str) -> dict[str, Any]:
+def _resolution_for(situation: OAuthSituation) -> dict[str, Any]:
     """Build a structured error response for a session-restoration situation.
 
     Schwab-specific situations (account_hash_required) are handled
     inline; everything else delegates to the wheel's standard OAuth
-    situation mapping.
+    situation mapping, which also carries the situation's evidence — the
+    provider's status and error code — into the response.
     """
-    if situation in _SCHWAB_SITUATIONS:
-        return {"success": False, **_SCHWAB_SITUATIONS[situation]}
+    if spec := _SCHWAB_SITUATIONS.get(situation.code):
+        return {"success": False, **spec}
     return runtime.oauth_situation_response(situation)
 
 
@@ -490,13 +492,13 @@ async def _require_session(npub: str):
         # account_hash_required recipe so they choose deliberately.
         auto = await _try_auto_select_account_hash(npub, creds)
         if auto is None:
-            return _resolution_for("no_account_hash")
+            return _resolution_for(OAuthSituation("no_account_hash"))
         account_hash = auto
 
     try:
         op_creds = await _ensure_operator_credentials()
     except Exception:
-        return _resolution_for("operator_not_configured")
+        return _resolution_for(OAuthSituation("operator_not_configured"))
 
     settings = _get_settings()
     from vault import UserSession, _create_client
@@ -586,7 +588,7 @@ async def get_account_numbers(npub: NpubField = "", dpop_token: str = "") -> str
 
     access_token = creds.get("access_token", "")
     if not access_token:
-        return _resolution_for("no_credentials")
+        return _resolution_for(OAuthSituation("no_credentials"))
 
     import httpx
     async with httpx.AsyncClient() as http:
