@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from tollbooth.oauth_situation import OAuthSituation
 
 
 def _make_mock_session():
@@ -28,7 +29,7 @@ class TestResolutionFor:
 
     def test_token_expired_maps_to_oauth_token_expired(self):
         from server import _resolution_for
-        result = _resolution_for("token_expired")
+        result = _resolution_for(OAuthSituation("token_expired"))
         assert result["success"] is False
         assert result["error_code"] == "oauth_token_expired"
         assert any("schwab_begin_oauth" in step for step in result["next_steps"])
@@ -36,36 +37,36 @@ class TestResolutionFor:
     def test_no_credentials_maps_to_oauth_not_yet_authorized(self):
         """Distinct from token_expired — first-time vs returning patron signal."""
         from server import _resolution_for
-        result = _resolution_for("no_credentials")
+        result = _resolution_for(OAuthSituation("no_credentials"))
         assert result["error_code"] == "oauth_not_yet_authorized"
         assert any("schwab_begin_oauth" in step for step in result["next_steps"])
 
     def test_no_account_hash_maps_to_account_hash_required(self):
         """Schwab-specific situation handled inline."""
         from server import _resolution_for
-        result = _resolution_for("no_account_hash")
+        result = _resolution_for(OAuthSituation("no_account_hash"))
         assert result["error_code"] == "account_hash_required"
         assert any("schwab_get_account_numbers" in step for step in result["next_steps"])
 
     def test_vault_bootstrapping_maps_to_warming_up(self):
         from server import _resolution_for
-        result = _resolution_for("vault_bootstrapping")
+        result = _resolution_for(OAuthSituation("vault_bootstrapping"))
         assert result["error_code"] == "warming_up"
 
     def test_operator_not_configured_maps_to_credentials_missing(self):
         from server import _resolution_for
-        result = _resolution_for("operator_not_configured")
+        result = _resolution_for(OAuthSituation("operator_not_configured"))
         assert result["error_code"] == "operator_credentials_missing"
 
     def test_no_oauth_config_maps_to_oauth_not_wired(self):
         from server import _resolution_for
-        result = _resolution_for("no_oauth_config")
+        result = _resolution_for(OAuthSituation("no_oauth_config"))
         assert result["error_code"] == "oauth_not_wired"
 
     def test_unknown_situation_returns_unknown_code(self):
         """Don't silently mask unknown situations as a routine code."""
         from server import _resolution_for
-        result = _resolution_for("some_new_situation_we_havent_seen")
+        result = _resolution_for(OAuthSituation("some_new_situation_we_havent_seen"))
         assert result["error_code"] == "oauth_situation_unknown"
 
 
@@ -94,7 +95,7 @@ class TestRequireSession:
 
         with patch.object(
             srv.runtime, "restore_oauth_session",
-            new=AsyncMock(return_value=(None, "token_expired")),
+            new=AsyncMock(return_value=(None, OAuthSituation("token_expired"))),
         ):
             result = await srv._require_session(VALID_NPUB)
 
@@ -115,7 +116,7 @@ class TestRequireSession:
         with (
             patch.object(
                 srv.runtime, "restore_oauth_session",
-                new=AsyncMock(return_value=(creds, "")),
+                new=AsyncMock(return_value=(creds, None)),
             ),
             patch.object(
                 srv, "_try_auto_select_account_hash",
@@ -142,7 +143,7 @@ class TestRequireSession:
         with (
             patch.object(
                 srv.runtime, "restore_oauth_session",
-                new=AsyncMock(return_value=(creds, "")),
+                new=AsyncMock(return_value=(creds, None)),
             ),
             patch.object(
                 srv, "_try_auto_select_account_hash",
@@ -172,7 +173,7 @@ class TestRequireSession:
         with (
             patch.object(
                 srv.runtime, "restore_oauth_session",
-                new=AsyncMock(return_value=(creds, "")),
+                new=AsyncMock(return_value=(creds, None)),
             ),
             patch.object(
                 srv, "_ensure_operator_credentials",
@@ -199,7 +200,7 @@ class TestRequireSession:
         with (
             patch.object(
                 srv.runtime, "restore_oauth_session",
-                new=AsyncMock(return_value=(creds, "")),
+                new=AsyncMock(return_value=(creds, None)),
             ),
             patch.object(
                 srv, "_ensure_operator_credentials",
@@ -419,7 +420,7 @@ class TestGetAccountNumbersProofGate:
         before the upstream Schwab HTTP call to keep the test offline."""
         import server as srv
 
-        restore_mock = AsyncMock(return_value=(None, "token_expired"))
+        restore_mock = AsyncMock(return_value=(None, OAuthSituation("token_expired")))
 
         with (
             patch("tollbooth.identity_proof.verify_proof", return_value=True),
@@ -445,7 +446,7 @@ class TestGetAccountNumbersProofGate:
             patch("tollbooth.identity_proof.verify_proof", return_value=True) as vp,
             patch.object(
                 srv.runtime, "restore_oauth_session",
-                new=AsyncMock(return_value=(None, "token_expired")),
+                new=AsyncMock(return_value=(None, OAuthSituation("token_expired"))),
             ),
         ):
             await srv.get_account_numbers(npub=VALID_NPUB, dpop_token="tok")
