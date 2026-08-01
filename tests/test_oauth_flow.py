@@ -115,6 +115,12 @@ class TestExchangeCodeForToken:
             "expires_in": 1800,
             "token_type": "Bearer",
         }
+        # A real status code, not a MagicMock. tollbooth-dpyc 0.78.0 classifies
+        # the response by `status_code >= 400` instead of calling
+        # raise_for_status(), so an unset mock attribute now raises TypeError.
+        # The old test passed only because raise_for_status() is a no-op on a
+        # mock — it never exercised status handling at all.
+        mock_response.status_code = 200
         mock_response.raise_for_status = MagicMock()
 
         mock_http = AsyncMock()
