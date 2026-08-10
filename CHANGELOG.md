@@ -22,6 +22,37 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Relabeled the combo-mark column `Current` → `EstClose (mark×100)` so it can't be misread as an underlying price or dollar P&L. Schwab's combo mark is unreliable for deep-ITM spreads (prints below intrinsic), so this value is explicitly framed as an estimated cost-to-close, never an authoritative exit price.
 - The quote fetch is **best-effort**: any failure (auth, network, malformed payload) degrades the new columns to `Underlying: n/a` and never breaks the rest of the positions output.
 
+## 0.13.0 — 2026-08-10
+
+### Added — Spreads rows say where the underlying is, not just what the leg cost
+
+`## Spreads` rows now carry the underlying's live equity price, the short strike's distance
+in dollars and percent, and whether that leg is ITM, OTM or ATM. A spread's risk is a
+question about where the underlying sits relative to the short strike, and the row could not
+answer it — the reader had to hold the quote in their head.
+
+`Current` became `EstClose (mark × 100)`, because Schwab's combo mark is unreliable on
+deep-ITM spreads and calling it "current" implied a precision it did not have. Quotes are
+fetched best-effort in one batch: a failure degrades the row to `Underlying: n/a` rather than
+taking the output with it.
+
+### Changed — CI compares the lock to the pin
+
+A re-lock drift between `pyproject.toml` and `uv.lock` could pass CI and then install a
+different version than the pin claimed. CI now compares them.
+
+### Changed — track tollbooth-dpyc 0.85.0
+
+Picks up `check_authority_balance`, which signed its proof for one tool name while calling
+another and so failed for every operator, and the shared param-default binding.
+
+### Changed — CI runs the check the deploy runs
+
+`ci.yml` inspects the deploy entrypoint, the check Horizon performs at build time. A suite
+that never imports the entrypoint cannot fail for the reason a build fails — that gap cost
+optionality-mcp four days of silent non-deployment. `release.yml` notes extraction now
+accepts this CHANGELOG's heading style instead of publishing a 16-byte body.
+
 ## 0.12.2 — 2026-07-16
 
 ### Changed — track tollbooth-dpyc 0.63.3
