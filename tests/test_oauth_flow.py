@@ -1,8 +1,5 @@
 """Tests for oauth_flow module — Schwab-specific wrappers over tollbooth.oauth2_collector."""
 
-import base64
-import hashlib
-import os
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -11,26 +8,13 @@ import pytest
 from oauth_flow import (
     begin_oauth_flow,
     build_authorize_url,
-    decrypt_collector_code,
     exchange_code_for_token,
     fetch_account_hash,
-    retrieve_code_from_collector,
 )
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _fake_encrypt(code: str, state: str) -> str:
-    """Encrypt a code the same way the collector does (AES-256-GCM)."""
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    key = hashlib.sha256(state.encode()).digest()
-    iv = os.urandom(12)
-    aes = AESGCM(key)
-    ct = aes.encrypt(iv, code.encode(), None)
-    return base64.urlsafe_b64encode(iv + ct).decode()
-
+# NOTE: decrypt_collector_code / retrieve_code_from_collector are SDK-owned
+# (tollbooth.oauth2_collector, NIP-44 sealed since 0.85.x) and tested there —
+# schwab only re-exports them, so it no longer duplicates their tests here.
 
 # ---------------------------------------------------------------------------
 # build_authorize_url tests
@@ -194,148 +178,3 @@ class TestFetchAccountHash:
         with patch("oauth_flow.httpx.AsyncClient", return_value=mock_http):
             with pytest.raises(ValueError, match="No accounts found"):
                 await fetch_account_hash("access-token-xyz")
-
-
-# ---------------------------------------------------------------------------
-# Encryption / decryption tests
-# ---------------------------------------------------------------------------
-
-
-class TestDecryptCollectorCode:
-    """Tests for decrypt_collector_code (XOR with SHA-256 keystream)."""
-
-    def test_roundtrip(self):
-        """decrypt_collector_code reverses the collector's encryption."""
-        encrypted = _fake_encrypt("my-secret-code", "my-state-token")
-        assert decrypt_collector_code(encrypted, "my-state-token") == "my-secret-code"
-
-    def test_npub_as_state_roundtrip(self):
-        """Encryption/decryption works with an npub as the state."""
-        npub = "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3aael2"
-        code = "authorization-code-from-schwab"
-        encrypted = _fake_encrypt(code, npub)
-        assert decrypt_collector_code(encrypted, npub) == code
-
-    def test_wrong_state_raises(self):
-        """decrypt_collector_code with wrong state raises OAuthCollectorError."""
-        from tollbooth.oauth2_collector import OAuthCollectorError
-
-        encrypted = _fake_encrypt("my-secret-code", "correct-state")
-        try:
-            result = decrypt_collector_code(encrypted, "wrong-state")
-            assert result != "my-secret-code"
-        except OAuthCollectorError:
-            pass  # Expected — wrong key produces invalid bytes
-
-
-# ---------------------------------------------------------------------------
-# retrieve_code_from_collector tests
-# ---------------------------------------------------------------------------
-
-
-class TestRetrieveCodeFromCollector:
-    """Tests for retrieve_code_from_collector (MCP JSON-RPC via /mcp/)."""
-
-    @pytest.mark.asyncio
-    async def test_returns_decrypted_code_on_success(self):
-        """Returns the decrypted code when collector has it."""
-        import json
-
-        state = "npub1abc123"
-        encrypted = _fake_encrypt("auth-code-abc", state)
-
-        sse_body = (
-            "event: message\n"
-            "data: "
-            + json.dumps({
-                "jsonrpc": "2.0", "id": 1,
-                "result": {"structuredContent": {"found": True, "code": encrypted}},
-            })
-            + "\n\n"
-        )
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.text = sse_body
-
-        mock_http = AsyncMock()
-        mock_http.post.return_value = mock_response
-        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
-        mock_http.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("tollbooth.oauth2_collector.httpx.AsyncClient", return_value=mock_http):
-            result = await retrieve_code_from_collector(
-                "https://collector.example.com", state
-            )
-
-        assert result == "auth-code-abc"
-        call_args = mock_http.post.call_args
-        assert call_args[0][0] == "https://collector.example.com/mcp/"
-
-    @pytest.mark.asyncio
-    async def test_returns_none_when_not_found(self):
-        """Returns None when collector hasn't received the code yet."""
-        import json
-
-        sse_body = (
-            "event: message\n"
-            "data: "
-            + json.dumps({
-                "jsonrpc": "2.0", "id": 1,
-                "result": {"structuredContent": {"found": False, "error": "not found or expired"}},
-            })
-            + "\n\n"
-        )
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.text = sse_body
-
-        mock_http = AsyncMock()
-        mock_http.post.return_value = mock_response
-        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
-        mock_http.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("tollbooth.oauth2_collector.httpx.AsyncClient", return_value=mock_http):
-            result = await retrieve_code_from_collector(
-                "https://collector.example.com", "npub1abc"
-            )
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_strips_trailing_slash(self):
-        """Strips trailing slash from collector URL."""
-        import json
-
-        state = "npub1xyz"
-        encrypted = _fake_encrypt("xyz", state)
-
-        sse_body = (
-            "event: message\n"
-            "data: "
-            + json.dumps({
-                "jsonrpc": "2.0", "id": 1,
-                "result": {"structuredContent": {"found": True, "code": encrypted}},
-            })
-            + "\n\n"
-        )
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.text = sse_body
-
-        mock_http = AsyncMock()
-        mock_http.post.return_value = mock_response
-        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
-        mock_http.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("tollbooth.oauth2_collector.httpx.AsyncClient", return_value=mock_http):
-            result = await retrieve_code_from_collector(
-                "https://collector.example.com/", state
-            )
-
-        assert result == "xyz"
-        mock_http.post.assert_called_once()
-        call_args = mock_http.post.call_args
-        assert call_args[0][0] == "https://collector.example.com/mcp/"
