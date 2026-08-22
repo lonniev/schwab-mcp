@@ -22,6 +22,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Relabeled the combo-mark column `Current` → `EstClose (mark×100)` so it can't be misread as an underlying price or dollar P&L. Schwab's combo mark is unreliable for deep-ITM spreads (prints below intrinsic), so this value is explicitly framed as an estimated cost-to-close, never an authoritative exit price.
 - The quote fetch is **best-effort**: any failure (auth, network, malformed payload) degrades the new columns to `Underlying: n/a` and never breaks the rest of the positions output.
 
+## [0.13.2] — 2026-08-22
+
+### Changed — track tollbooth-dpyc 0.87.1
+
+Picks up the relay-reliability work: `COURIER_RELAY_UNREACHABLE` so an
+unreachable pinned rendezvous is no longer reported as the patron never
+replying, relay-failure reporting to the Oracle, and a publish that counts
+only when the relay acknowledges that exact event.
+
 ## 0.13.1 — 2026-08-17
 
 ### Changed — track tollbooth-dpyc 0.86.0 (GitHub-free bootstrap)
