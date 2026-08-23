@@ -22,6 +22,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Relabeled the combo-mark column `Current` → `EstClose (mark×100)` so it can't be misread as an underlying price or dollar P&L. Schwab's combo mark is unreliable for deep-ITM spreads (prints below intrinsic), so this value is explicitly framed as an estimated cost-to-close, never an authoritative exit price.
 - The quote fetch is **best-effort**: any failure (auth, network, malformed payload) degrades the new columns to `Underlying: n/a` and never breaks the rest of the positions output.
 
+## [0.13.4] — 2026-08-22
+
+### Changed — track tollbooth-dpyc 0.87.3
+
+Recovering an orphaned job now uses the detached executor it was
+dispatched to. The recovery path never resolved the executor, so a
+job orphaned by a container recycle was retried in-process on the
+new front — bypassing the detached runner precisely when it was
+the point.
+
 ## [0.13.3] — 2026-08-22
 
 ### Changed — track tollbooth-dpyc 0.87.2
