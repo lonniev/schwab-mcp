@@ -3,19 +3,6 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.13.6] — 2026-08-24
-
-### Security — track tollbooth-dpyc 0.88.1 (cryptography floor raised to >=49.0.0)
-
-Picks up the SDK's fix for GHSA-m2h6-j472-rp4c: the X.509 verifier accepted
-wildcard DNS SANs, escaping `permittedSubtrees`. The advisory is fixed in
-cryptography 49.0.0, and the SDK previously declared a floor of `>=46.0.5` —
-which admitted every affected release.
-
-No install here was exposed: the resolved lock already carried a patched
-cryptography. What changes is what a fresh resolve is *allowed* to land on.
-See tollbooth-dpyc v0.88.1.
-
 ## [Unreleased]
 
 ### Changed — track tollbooth-dpyc 0.77.0 (`OAuthSituation`)
@@ -34,6 +21,19 @@ See tollbooth-dpyc v0.88.1.
 - Each spread row now carries the authoritative decision inputs derived from the underlying's **live equity quote** (reliable), not the option combo mark: `Underlying`, `ShortDist` (signed $ and %), and an `ITM`/`OTM`/`ATM` flag for the short leg. `get_positions` batch-fetches the underlyings via `get_quotes` in one call — no more second `get_stock_quote` and manual arithmetic per leg.
 - Relabeled the combo-mark column `Current` → `EstClose (mark×100)` so it can't be misread as an underlying price or dollar P&L. Schwab's combo mark is unreliable for deep-ITM spreads (prints below intrinsic), so this value is explicitly framed as an estimated cost-to-close, never an authoritative exit price.
 - The quote fetch is **best-effort**: any failure (auth, network, malformed payload) degrades the new columns to `Underlying: n/a` and never breaks the rest of the positions output.
+
+## [0.13.6] — 2026-08-24
+
+### Security — track tollbooth-dpyc 0.88.1 (cryptography floor raised to >=49.0.0)
+
+Picks up the SDK's fix for GHSA-m2h6-j472-rp4c: the X.509 verifier accepted
+wildcard DNS SANs, escaping `permittedSubtrees`. The advisory is fixed in
+cryptography 49.0.0, and the SDK previously declared a floor of `>=46.0.5` —
+which admitted every affected release.
+
+No install here was exposed: the resolved lock already carried a patched
+cryptography. What changes is what a fresh resolve is *allowed* to land on.
+See tollbooth-dpyc v0.88.1.
 
 ## [0.13.5] — 2026-08-22
 
