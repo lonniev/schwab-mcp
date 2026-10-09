@@ -3,24 +3,7 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
-
-### Changed — track tollbooth-dpyc 0.77.0 (`OAuthSituation`)
-
-- `restore_oauth_session` now hands back an `OAuthSituation` carrying the
-  provider's own status and error code, not a bare string. `_resolution_for`
-  switches on `situation.code`, and the three Schwab-side literals
-  (`no_account_hash`, `operator_not_configured`, `no_credentials`) wrap at the
-  call site. Behaviour is unchanged for Schwab patrons except that OAuth
-  failures now carry evidence — and an `invalid_client` refusal of the
-  operator's own app credentials no longer reaches patrons as "your session
-  expired" with an invitation to re-authorize.
-
-### Added — underlying price + short-strike distance in `## Spreads` rows (#64)
-
-- Each spread row now carries the authoritative decision inputs derived from the underlying's **live equity quote** (reliable), not the option combo mark: `Underlying`, `ShortDist` (signed $ and %), and an `ITM`/`OTM`/`ATM` flag for the short leg. `get_positions` batch-fetches the underlyings via `get_quotes` in one call — no more second `get_stock_quote` and manual arithmetic per leg.
-- Relabeled the combo-mark column `Current` → `EstClose (mark×100)` so it can't be misread as an underlying price or dollar P&L. Schwab's combo mark is unreliable for deep-ITM spreads (prints below intrinsic), so this value is explicitly framed as an estimated cost-to-close, never an authoritative exit price.
-- The quote fetch is **best-effort**: any failure (auth, network, malformed payload) degrades the new columns to `Underlying: n/a` and never breaks the rest of the positions output.
+Changes not yet released live in `changelog.d/`, one file per change — see the README there for why, and `scripts/changelog.py` for what folds them in at release time.
 
 ## [0.13.6] — 2026-08-24
 
@@ -471,4 +454,3 @@ Picks up the wheel's runtime-name + DRY pass:
 - Gracefully handle missing Schwab credentials at startup
 - Add .mcp.json to gitignore
 - Initial scaffold: FastMCP server, OAuth module, tools, and tests
-
