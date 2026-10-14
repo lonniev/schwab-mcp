@@ -1,0 +1,1 @@
+- Every Schwab tool carries a title and its behaviour (each reads, and reaches the Schwab API); `npub` and `dpop_token` use the fleet's shared descriptions; the server is named `schwab-mcp` and reports its own version, website and icon.
