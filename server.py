@@ -9,31 +9,33 @@ domain-specific Schwab brokerage tools are defined here.
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any
+from typing import Any
 
 from fastmcp import FastMCP
-from pydantic import Field
+from mcp.types import Icon
 from tollbooth.credential_templates import CredentialTemplate, FieldSpec
 from tollbooth.credential_validators import validate_btcpay_creds, validate_required
 from tollbooth.oauth_config import OAuthProviderConfig
 from tollbooth.oauth_situation import OAuthSituation
+from tollbooth.params import DpopToken, PatronNpub
 from tollbooth.runtime import OperatorRuntime, register_standard_tools
-from tollbooth.tool_identity import STANDARD_IDENTITIES, ToolIdentity, capability_uuid
+from tollbooth.tool_identity import (
+    READS_REMOTE,
+    STANDARD_IDENTITIES,
+    ToolIdentity,
+    capability_uuid,
+)
 from tollbooth.version import resolve_service_version
 
 logger = logging.getLogger(__name__)
 
-# Shared npub field annotation — avoids E501 on every tool signature
-NpubField = Annotated[
-    str,
-    Field(
-        description="Required. Your Nostr public key (npub1...) "
-        "for credit billing."
-    ),
-]
+SERVICE_VERSION = resolve_service_version("schwab-mcp", __file__)
 
 mcp = FastMCP(
-    "Schwab MCP",
+    "schwab-mcp",
+    version=SERVICE_VERSION,
+    website_url="https://github.com/lonniev/schwab-mcp",
+    icons=[Icon(src="https://tollbooth-dpyc.com/dpyc-logo.png", mimeType="image/png")],
     instructions=(
         "Schwab MCP — AI agent access to Charles Schwab brokerage data, "
         "monetized via DPYC Tollbooth Lightning micropayments.\n\n"
@@ -128,6 +130,8 @@ _DOMAIN_TOOLS = [
         tool_id=GET_ACCOUNT_NUMBERS_UUID,
         capability="get_account_numbers",
         category="free",
+        title="List account numbers",
+        behavior=READS_REMOTE,
         intent="List Schwab account numbers and hash identifiers.",
     ),
     # Paid — write tier (brokerage reads)
@@ -135,36 +139,48 @@ _DOMAIN_TOOLS = [
         tool_id=GET_BROKERAGE_POSITIONS_UUID,
         capability="get_brokerage_positions",
         category="write",
+        title="Account positions",
+        behavior=READS_REMOTE,
         intent="Get positions for a Schwab brokerage account.",
     ),
     ToolIdentity(
         tool_id=GET_BROKERAGE_BALANCES_UUID,
         capability="get_brokerage_balances",
         category="write",
+        title="Account balances",
+        behavior=READS_REMOTE,
         intent="Get account balances for a Schwab brokerage account.",
     ),
     ToolIdentity(
         tool_id=GET_STOCK_QUOTE_UUID,
         capability="get_stock_quote",
         category="write",
+        title="Stock quotes",
+        behavior=READS_REMOTE,
         intent="Get real-time quotes for one or more ticker symbols.",
     ),
     ToolIdentity(
         tool_id=GET_MARKET_MOVERS_UUID,
         capability="get_market_movers",
         category="write",
+        title="Market movers",
+        behavior=READS_REMOTE,
         intent="Get top movers for a market index.",
     ),
     ToolIdentity(
         tool_id=GET_MARKET_HOURS_UUID,
         capability="get_market_hours",
         category="write",
+        title="Market hours",
+        behavior=READS_REMOTE,
         intent="Get trading hours for equity, option, and other markets.",
     ),
     ToolIdentity(
         tool_id=SEARCH_INSTRUMENTS_UUID,
         capability="search_instruments",
         category="write",
+        title="Search instruments",
+        behavior=READS_REMOTE,
         intent="Search for instruments by symbol, name, or CUSIP.",
     ),
     # Paid — heavy tier (complex data retrieval)
@@ -172,12 +188,16 @@ _DOMAIN_TOOLS = [
         tool_id=GET_OPTION_CHAIN_UUID,
         capability="get_option_chain",
         category="heavy",
+        title="Option chain",
+        behavior=READS_REMOTE,
         intent="Get filtered option chain for spread evaluation.",
     ),
     ToolIdentity(
         tool_id=GET_PRICE_HISTORY_UUID,
         capability="get_price_history",
         category="heavy",
+        title="Price history",
+        behavior=READS_REMOTE,
         intent="Get historical OHLCV price data for trend analysis.",
     ),
     # Paid — heavy tier (multi-record history scans)
@@ -185,24 +205,32 @@ _DOMAIN_TOOLS = [
         tool_id=GET_BROKERAGE_ORDERS_UUID,
         capability="get_brokerage_orders",
         category="heavy",
+        title="Order history",
+        behavior=READS_REMOTE,
         intent="Get order history for a Schwab brokerage account.",
     ),
     ToolIdentity(
         tool_id=GET_BROKERAGE_ORDER_UUID,
         capability="get_brokerage_order",
         category="heavy",
+        title="Order details",
+        behavior=READS_REMOTE,
         intent="Get details for a single order by ID.",
     ),
     ToolIdentity(
         tool_id=GET_BROKERAGE_TRANSACTIONS_UUID,
         capability="get_brokerage_transactions",
         category="heavy",
+        title="Transaction history",
+        behavior=READS_REMOTE,
         intent="Get transaction history for a Schwab brokerage account.",
     ),
     ToolIdentity(
         tool_id=GET_BROKERAGE_TRANSACTION_UUID,
         capability="get_brokerage_transaction",
         category="heavy",
+        title="Transaction details",
+        behavior=READS_REMOTE,
         intent="Get details for a single transaction by ID.",
     ),
 ]
@@ -309,7 +337,7 @@ tool = register_standard_tools(
     "schwab",
     runtime,
     service_name="schwab-mcp",
-    service_version=resolve_service_version("schwab-mcp", __file__),
+    service_version=SERVICE_VERSION,
 )
 
 
@@ -547,7 +575,9 @@ async def _require_session(npub: str):
 
 
 @tool
-async def get_account_numbers(npub: NpubField = "", dpop_token: str = "") -> str | dict[str, Any]:
+async def get_account_numbers(
+    npub: PatronNpub = "", dpop_token: DpopToken = "",
+) -> str | dict[str, Any]:
     """List Schwab account numbers and their hash identifiers.
 
     Call after completing OAuth. Returns accounts with hash values
@@ -620,7 +650,7 @@ async def get_account_numbers(npub: NpubField = "", dpop_token: str = "") -> str
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_positions"), catch_errors=True)
 async def get_brokerage_positions(
-    npub: NpubField = "", dpop_token: str = "",
+    npub: PatronNpub = "", dpop_token: DpopToken = "",
 ) -> str | dict[str, Any]:
     """Get current positions in the active Schwab account, with automatic
     vertical-spread detection.
@@ -662,7 +692,7 @@ async def get_brokerage_positions(
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_balances"), catch_errors=True)
 async def get_brokerage_balances(
-    npub: NpubField = "", dpop_token: str = "",
+    npub: PatronNpub = "", dpop_token: DpopToken = "",
 ) -> str | dict[str, Any]:
     """Get the active Schwab account's current balance summary.
 
@@ -709,7 +739,7 @@ async def get_brokerage_balances(
 @tool
 @runtime.paid_tool(capability_uuid("get_stock_quote"), catch_errors=True)
 async def get_stock_quote(
-    symbols: str, npub: NpubField = "", dpop_token: str = "",
+    symbols: str, npub: PatronNpub = "", dpop_token: DpopToken = "",
 ) -> str | dict[str, Any]:
     """Get real-time quotes for one or more symbols.
 
@@ -749,7 +779,7 @@ async def get_option_chain(
     strike_count: int = 20,
     contract_type: str = "ALL",
     days_to_expiration: int = 21,
-    npub: NpubField = "", dpop_token: str = "",
+    npub: PatronNpub = "", dpop_token: DpopToken = "",
 ) -> str | dict[str, Any]:
     """Get a filtered option chain suitable for spread evaluation.
 
@@ -825,7 +855,7 @@ async def get_price_history(
     period: int = 1,
     frequency_type: str = "daily",
     frequency: int = 1,
-    npub: NpubField = "", dpop_token: str = "",
+    npub: PatronNpub = "", dpop_token: DpopToken = "",
 ) -> str | dict[str, Any]:
     """Get historical OHLCV candle data for a symbol.
 
@@ -877,7 +907,7 @@ async def get_market_movers(
     index: str = "$SPX",
     sort: str = "PERCENT_CHANGE_UP",
     frequency: int = 0,
-    npub: NpubField = "", dpop_token: str = "",
+    npub: PatronNpub = "", dpop_token: DpopToken = "",
 ) -> str | dict[str, Any]:
     """Get top movers for a market index — Schwab's curated mover screener.
 
@@ -930,7 +960,7 @@ async def get_market_movers(
 async def get_market_hours(
     markets: str = "equity,option",
     date: str = "",
-    npub: NpubField = "", dpop_token: str = "",
+    npub: PatronNpub = "", dpop_token: DpopToken = "",
 ) -> str | dict[str, Any]:
     """Get trading hours for one or more market types.
 
@@ -969,7 +999,7 @@ async def get_market_hours(
 async def search_instruments(
     symbol: str,
     projection: str = "symbol-search",
-    npub: NpubField = "", dpop_token: str = "",
+    npub: PatronNpub = "", dpop_token: DpopToken = "",
 ) -> str | dict[str, Any]:
     """Search Schwab's instrument catalog by symbol, name, or CUSIP.
 
@@ -1019,7 +1049,7 @@ async def get_brokerage_orders(
     from_date: str = "",
     to_date: str = "",
     status_filter: str = "",
-    npub: NpubField = "", dpop_token: str = "",
+    npub: PatronNpub = "", dpop_token: DpopToken = "",
 ) -> str | dict[str, Any]:
     """Get order history for the active Schwab account.
 
@@ -1068,7 +1098,7 @@ async def get_brokerage_orders(
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_order"), catch_errors=True)
 async def get_brokerage_order(
-    order_id: str, npub: NpubField = "", dpop_token: str = "",
+    order_id: str, npub: PatronNpub = "", dpop_token: DpopToken = "",
 ) -> str | dict[str, Any]:
     """Get full details for a single order by Schwab order ID.
 
@@ -1100,7 +1130,7 @@ async def get_brokerage_transactions(
     from_date: str = "",
     to_date: str = "",
     transaction_types: str = "",
-    npub: NpubField = "", dpop_token: str = "",
+    npub: PatronNpub = "", dpop_token: DpopToken = "",
 ) -> str | dict[str, Any]:
     """Get transaction history for the active Schwab account.
 
@@ -1148,7 +1178,7 @@ async def get_brokerage_transactions(
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_transaction"), catch_errors=True)
 async def get_brokerage_transaction(
-    transaction_id: str, npub: NpubField = "", dpop_token: str = "",
+    transaction_id: str, npub: PatronNpub = "", dpop_token: DpopToken = "",
 ) -> str | dict[str, Any]:
     """Get full details for a single transaction by Schwab transaction ID.
 
