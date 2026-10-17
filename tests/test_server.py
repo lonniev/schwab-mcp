@@ -389,66 +389,37 @@ class TestGetAccountNumbersProofGate:
         assert result["error_code"] == "npub_invalid"
 
     @pytest.mark.asyncio
-    async def test_missing_proof_returns_proof_missing(self):
-        """Valid npub but no proof → wheel's proof_validation_error envelope.
-        Stops the lookup before any OAuth session restoration."""
+    async def test_an_unproven_caller_gets_the_gates_denial(self):
+        """The one proof gate refuses → its denial comes back verbatim and
+        the lookup stops before any OAuth session restoration (the IDOR fix)."""
         import server as srv
 
-        result = await srv.get_account_numbers(npub=VALID_NPUB, dpop_token="")
-        assert isinstance(result, dict)
-        assert result["error_code"] == "proof_missing"
+        denial = {"success": False, "error_code": "proof_required", "error": "proof required"}
+        restore_mock = AsyncMock()
+        with (
+            patch.object(srv.runtime, "require_caller_proof", new=AsyncMock(return_value=denial)),
+            patch.object(srv.runtime, "restore_oauth_session", new=restore_mock),
+        ):
+            result = await srv.get_account_numbers(npub=VALID_NPUB, dpop_token="")
+
+        assert result == denial
+        restore_mock.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_invalid_proof_returns_proof_invalid(self):
-        """Non-empty but bogus proof → cryptographic verify_proof fails →
-        proof_invalid envelope. Patron cannot bypass the IDOR fix by
-        sending an unverified string."""
-        import server as srv
-
-        with patch("tollbooth.identity_proof.verify_proof", return_value=False):
-            result = await srv.get_account_numbers(
-                npub=VALID_NPUB, dpop_token="garbage-token"
-            )
-
-        assert isinstance(result, dict)
-        assert result["error_code"] == "proof_invalid"
-
-    @pytest.mark.asyncio
-    async def test_valid_proof_proceeds_to_oauth_session_lookup(self):
-        """Once the proof verifies, the tool proceeds normally — confirmed
-        by observing that restore_oauth_session is called. We intercept it
-        before the upstream Schwab HTTP call to keep the test offline."""
+    async def test_a_proven_caller_proceeds_to_oauth_session_lookup(self):
+        """Once the gate passes, the tool proceeds — confirmed by observing that
+        restore_oauth_session is called. Intercepted before the upstream Schwab
+        HTTP call to keep the test offline."""
         import server as srv
 
         restore_mock = AsyncMock(return_value=(None, OAuthSituation("token_expired")))
-
+        gate = AsyncMock(return_value=None)
         with (
-            patch("tollbooth.identity_proof.verify_proof", return_value=True),
+            patch.object(srv.runtime, "require_caller_proof", new=gate),
             patch.object(srv.runtime, "restore_oauth_session", new=restore_mock),
         ):
-            result = await srv.get_account_numbers(
-                npub=VALID_NPUB, dpop_token="valid-token"
-            )
+            result = await srv.get_account_numbers(npub=VALID_NPUB, dpop_token="tok")
 
+        gate.assert_awaited_once_with(VALID_NPUB, "tok", "get_account_numbers")
         restore_mock.assert_called_once_with(VALID_NPUB)
-        # The mocked restore returns token_expired — proof check passed,
-        # we just stopped before the upstream Schwab call.
         assert result["error_code"] == "oauth_token_expired"
-
-    @pytest.mark.asyncio
-    async def test_proof_binding_uses_get_account_numbers_capability(self):
-        """The tool_name argument to verify_proof must be the capability
-        string — a proof issued for one tool cannot be replayed against
-        get_account_numbers."""
-        import server as srv
-
-        with (
-            patch("tollbooth.identity_proof.verify_proof", return_value=True) as vp,
-            patch.object(
-                srv.runtime, "restore_oauth_session",
-                new=AsyncMock(return_value=(None, OAuthSituation("token_expired"))),
-            ),
-        ):
-            await srv.get_account_numbers(npub=VALID_NPUB, dpop_token="tok")
-
-        vp.assert_called_once_with("tok", VALID_NPUB, "get_account_numbers")

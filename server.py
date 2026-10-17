@@ -588,11 +588,10 @@ async def get_account_numbers(
     ``update_patron_credential(field="account_hash", value=<hash>)``
     to set your preferred account.
 
-    Free (no api_sats deducted) but **proof-gated**: the caller must
-    prove Schnorr-control of ``npub`` via ``request_npub_proof`` +
-    ``receive_npub_proof`` first, then pass the resulting token here.
-    Without the proof check, an attacker who knew a patron's public
-    npub could fetch that patron's Schwab account hashes (IDOR).
+    Free (no api_sats deducted) but **proof-gated**: the connection must
+    prove ``npub`` (a request signed with its key, or a connection that
+    holds it). Without the proof check, an attacker who knew a patron's
+    public npub could fetch that patron's Schwab account hashes (IDOR).
 
     Args:
         npub: Your DPYC patron Nostr public key (npub1...).
@@ -602,17 +601,10 @@ async def get_account_numbers(
     err = runtime.npub_validation_error(npub)
     if err is not None:
         return err
-    err = runtime.proof_validation_error(dpop_token)
-    if err is not None:
+    # The one proof gate: the connection (a signed request or a holder),
+    # else a proof passed in dpop_token.
+    if err := await runtime.require_caller_proof(npub, dpop_token, "get_account_numbers"):
         return err
-    from tollbooth.identity_proof import verify_proof
-    if not verify_proof(dpop_token, npub, "get_account_numbers"):
-        return {
-            "success": False,
-            "error_code": "proof_invalid",
-            "error": "Invalid or expired proof for npub. "
-                     "Re-run request_npub_proof + receive_npub_proof.",
-        }
 
     # Need OAuth tokens but NOT account_hash
     creds, situation = await runtime.restore_oauth_session(npub)
