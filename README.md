@@ -45,14 +45,13 @@ subscription nag screens, and KYC friction.
    (`npub`), not an email or password. One keypair per role, managed by the
    user. No account creation forms.
 
-3. **Poison-keyed proof** -- Every paid tool call requires a `dpop_token`
-   parameter carrying a poison phrase (e.g., `bold-hawk-42`) returned by
-   `request_npub_proof` / `receive_npub_proof`. The calling application
-   remembers this token and passes it on every subsequent call. The MCP
-   stores only `sha256(poison):npub` in the vault -- never the raw phrase.
-   Proofs are generated via a **human-in-the-loop** Secure Courier exchange:
-   the patron consciously approves each proof request in their Nostr client.
-   Duration is patron-chosen (up to 7 days). Proofs survive MCP restarts.
+3. **Identity on the connection** -- Every paid tool call names the patron's
+   `npub`; the connection proves it. A client holding the nsec signs each
+   request (NIP-98). A client holding no key connects with OAuth and proves
+   the npub once through `request_npub_proof` / `receive_npub_proof` -- a
+   **human-in-the-loop** Secure Courier exchange the patron approves in their
+   Nostr client. The connection then holds the npub for the duration the
+   patron chose, across MCP restarts.
 
 4. **UUID-keyed tool identity** -- Every tool is a `ToolIdentity` object with
    a deterministic UUID v5 derived from a capability name. Pricing hints come
@@ -82,7 +81,7 @@ subscription nag screens, and KYC friction.
 
 ### Brokerage (paid -- credit-gated)
 
-All paid tools require `npub` and `dpop_token` parameters for identity verification.
+All paid tools take the patron's `npub`; the connection proves it.
 
 | Tool | Tier | Description |
 |------|------|-------------|
@@ -124,8 +123,8 @@ All paid tools require `npub` and `dpop_token` parameters for identity verificat
 | `check_authority_balance` | Check operator's cert-sat balance at Authority |
 | `get_pricing_model` | View the active pricing model |
 | `list_constraint_types` | List available constraint types and schemas |
-| `request_npub_proof` | Request poison-keyed ownership proof via Nostr DM |
-| `receive_npub_proof` | Receive and cache proof; returns proof_token |
+| `request_npub_proof` | Request an npub ownership proof via Nostr DM; returns its nonce |
+| `receive_npub_proof` | Collect the reply into this connection, which then holds the npub |
 | `get_operator_onboarding_status` | Report operator configuration readiness |
 | `get_patron_onboarding_status` | Report patron credential readiness |
 | `list_notarizations` | List recent Bitcoin notarization records |
@@ -140,7 +139,7 @@ All brokerage tools are read-only. No orders are placed.
 - **Tollbooth DPYC&trade;**: pre-funded Lightning balances, Authority-certified purchase orders, NeonVault (Postgres) for ledger persistence
 - **Registry discovery**: OAuth2 collector URL resolved from DPYC&trade; registry at runtime (no `OAUTH_COLLECTOR_URL` env var needed)
 - **Credential validation**: operator credentials are validated at receive time -- `btcpay_host`, `app_key`, and `secret` must all be present before vaulting
-- **Poison-keyed proof**: all paid tools require a `dpop_token` parameter -- a poison phrase from `request_npub_proof` / `receive_npub_proof` that the calling application remembers. The MCP stores only the hash. Survives restarts; patron-chosen TTL up to 7 days. Restricted tools (operator-only) still use kind-27235 Schnorr signatures.
+- **Identity on the connection**: a request signed with the npub's key (NIP-98), or an OAuth connection that holds the npub after one Secure Courier DM. Survives restarts; patron-chosen duration. Restricted tools (operator-only) need the operator's npub proven the same way.
 
 ---
 
@@ -278,7 +277,7 @@ Free tools are always available:
 
 **Cold start / first tool call fails:** The Horizon runtime may cold-start on the first request. Retry the tool call inline -- the server warms up within a few seconds and the second call succeeds.
 
-**"proof is required":** Call `request_npub_proof` followed by `receive_npub_proof` to prove npub ownership. The response includes a `proof_token` -- pass it as the `dpop_token` parameter on every subsequent paid tool call. Duration is patron-chosen (up to 7 days). The proof survives MCP restarts.
+**"proof is required":** Call `request_npub_proof`, reply to the DM, then `receive_npub_proof(patron_npub, nonce)` once. Your connection then holds the npub; pass only `npub` on later calls. Duration is patron-chosen. The proof survives MCP restarts.
 
 **"Insufficient credit balance":** Call `purchase_credits` to top up. Use `check_balance` to see your current api_sats balance and `tranche_lifetime` expiry.
 

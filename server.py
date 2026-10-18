@@ -17,7 +17,7 @@ from tollbooth.credential_templates import CredentialTemplate, FieldSpec
 from tollbooth.credential_validators import validate_btcpay_creds, validate_required
 from tollbooth.oauth_config import OAuthProviderConfig
 from tollbooth.oauth_situation import OAuthSituation
-from tollbooth.params import DpopToken, PatronNpub
+from tollbooth.params import PatronNpub
 from tollbooth.runtime import OperatorRuntime, register_standard_tools
 from tollbooth.tool_identity import (
     READS_REMOTE,
@@ -47,7 +47,7 @@ mcp = FastMCP(
         "recipient_npub=<operator_npub>)`\n"
         '   - Reply with JSON: `{"app_key": "...", "secret": "..."}`\n'
         "   - Call `receive_credentials(sender_npub=<operator_npub>, "
-        'service="schwab-operator", dpop_token=<session phrase from the welcome DM>)`'
+        'service="schwab-operator", nonce=<session phrase from the welcome DM>)`'
         " — all three are required\n\n"
         "3. **Patron onboarding** (per-user):\n"
         "   - Call `begin_oauth(npub=<your_npub>)` to get an authorization URL\n"
@@ -579,7 +579,7 @@ async def _require_session(npub: str):
 
 @tool
 async def get_account_numbers(
-    npub: PatronNpub = "", dpop_token: DpopToken = "",
+    npub: PatronNpub = "",
 ) -> str | dict[str, Any]:
     """List Schwab account numbers and their hash identifiers.
 
@@ -595,15 +595,12 @@ async def get_account_numbers(
 
     Args:
         npub: Your DPYC patron Nostr public key (npub1...).
-        dpop_token: Schnorr proof token issued by request/receive_npub_proof
-            for capability ``get_account_numbers``.
     """
     err = runtime.npub_validation_error(npub)
     if err is not None:
         return err
-    # The one proof gate: the connection (a signed request or a holder),
-    # else a proof passed in dpop_token.
-    if err := await runtime.require_caller_proof(npub, dpop_token, "get_account_numbers"):
+    # The one proof gate: the connection (a signed request or a holder).
+    if err := await runtime.require_caller_proof(npub):
         return err
 
     # Need OAuth tokens but NOT account_hash
@@ -645,7 +642,7 @@ async def get_account_numbers(
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_positions"), catch_errors=True)
 async def get_brokerage_positions(
-    npub: PatronNpub = "", dpop_token: DpopToken = "",
+    npub: PatronNpub = "",
 ) -> str | dict[str, Any]:
     """Get current positions in the active Schwab account, with automatic
     vertical-spread detection.
@@ -687,7 +684,7 @@ async def get_brokerage_positions(
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_balances"), catch_errors=True)
 async def get_brokerage_balances(
-    npub: PatronNpub = "", dpop_token: DpopToken = "",
+    npub: PatronNpub = "",
 ) -> str | dict[str, Any]:
     """Get the active Schwab account's current balance summary.
 
@@ -734,7 +731,7 @@ async def get_brokerage_balances(
 @tool
 @runtime.paid_tool(capability_uuid("get_stock_quote"), catch_errors=True)
 async def get_stock_quote(
-    symbols: str, npub: PatronNpub = "", dpop_token: DpopToken = "",
+    symbols: str, npub: PatronNpub = "",
 ) -> str | dict[str, Any]:
     """Get real-time quotes for one or more symbols.
 
@@ -774,7 +771,7 @@ async def get_option_chain(
     strike_count: int = 20,
     contract_type: str = "ALL",
     days_to_expiration: int = 21,
-    npub: PatronNpub = "", dpop_token: DpopToken = "",
+    npub: PatronNpub = "",
 ) -> str | dict[str, Any]:
     """Get a filtered option chain suitable for spread evaluation.
 
@@ -850,7 +847,7 @@ async def get_price_history(
     period: int = 1,
     frequency_type: str = "daily",
     frequency: int = 1,
-    npub: PatronNpub = "", dpop_token: DpopToken = "",
+    npub: PatronNpub = "",
 ) -> str | dict[str, Any]:
     """Get historical OHLCV candle data for a symbol.
 
@@ -902,7 +899,7 @@ async def get_market_movers(
     index: str = "$SPX",
     sort: str = "PERCENT_CHANGE_UP",
     frequency: int = 0,
-    npub: PatronNpub = "", dpop_token: DpopToken = "",
+    npub: PatronNpub = "",
 ) -> str | dict[str, Any]:
     """Get top movers for a market index — Schwab's curated mover screener.
 
@@ -955,7 +952,7 @@ async def get_market_movers(
 async def get_market_hours(
     markets: str = "equity,option",
     date: str = "",
-    npub: PatronNpub = "", dpop_token: DpopToken = "",
+    npub: PatronNpub = "",
 ) -> str | dict[str, Any]:
     """Get trading hours for one or more market types.
 
@@ -994,7 +991,7 @@ async def get_market_hours(
 async def search_instruments(
     symbol: str,
     projection: str = "symbol-search",
-    npub: PatronNpub = "", dpop_token: DpopToken = "",
+    npub: PatronNpub = "",
 ) -> str | dict[str, Any]:
     """Search Schwab's instrument catalog by symbol, name, or CUSIP.
 
@@ -1044,7 +1041,7 @@ async def get_brokerage_orders(
     from_date: str = "",
     to_date: str = "",
     status_filter: str = "",
-    npub: PatronNpub = "", dpop_token: DpopToken = "",
+    npub: PatronNpub = "",
 ) -> str | dict[str, Any]:
     """Get order history for the active Schwab account.
 
@@ -1093,7 +1090,7 @@ async def get_brokerage_orders(
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_order"), catch_errors=True)
 async def get_brokerage_order(
-    order_id: str, npub: PatronNpub = "", dpop_token: DpopToken = "",
+    order_id: str, npub: PatronNpub = "",
 ) -> str | dict[str, Any]:
     """Get full details for a single order by Schwab order ID.
 
@@ -1125,7 +1122,7 @@ async def get_brokerage_transactions(
     from_date: str = "",
     to_date: str = "",
     transaction_types: str = "",
-    npub: PatronNpub = "", dpop_token: DpopToken = "",
+    npub: PatronNpub = "",
 ) -> str | dict[str, Any]:
     """Get transaction history for the active Schwab account.
 
@@ -1173,7 +1170,7 @@ async def get_brokerage_transactions(
 @tool
 @runtime.paid_tool(capability_uuid("get_brokerage_transaction"), catch_errors=True)
 async def get_brokerage_transaction(
-    transaction_id: str, npub: PatronNpub = "", dpop_token: DpopToken = "",
+    transaction_id: str, npub: PatronNpub = "",
 ) -> str | dict[str, Any]:
     """Get full details for a single transaction by Schwab transaction ID.
 

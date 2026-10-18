@@ -376,7 +376,7 @@ class TestGetAccountNumbersProofGate:
         Schwab API call."""
         import server as srv
 
-        result = await srv.get_account_numbers(npub="", dpop_token="any")
+        result = await srv.get_account_numbers(npub="")
         assert isinstance(result, dict)
         assert result["error_code"] == "npub_missing"
 
@@ -384,7 +384,7 @@ class TestGetAccountNumbersProofGate:
     async def test_malformed_npub_returns_npub_invalid(self):
         import server as srv
 
-        result = await srv.get_account_numbers(npub="not-an-npub", dpop_token="any")
+        result = await srv.get_account_numbers(npub="not-an-npub")
         assert isinstance(result, dict)
         assert result["error_code"] == "npub_invalid"
 
@@ -400,7 +400,7 @@ class TestGetAccountNumbersProofGate:
             patch.object(srv.runtime, "require_caller_proof", new=AsyncMock(return_value=denial)),
             patch.object(srv.runtime, "restore_oauth_session", new=restore_mock),
         ):
-            result = await srv.get_account_numbers(npub=VALID_NPUB, dpop_token="")
+            result = await srv.get_account_numbers(npub=VALID_NPUB)
 
         assert result == denial
         restore_mock.assert_not_called()
@@ -418,8 +418,8 @@ class TestGetAccountNumbersProofGate:
             patch.object(srv.runtime, "require_caller_proof", new=gate),
             patch.object(srv.runtime, "restore_oauth_session", new=restore_mock),
         ):
-            result = await srv.get_account_numbers(npub=VALID_NPUB, dpop_token="tok")
+            result = await srv.get_account_numbers(npub=VALID_NPUB)
 
-        gate.assert_awaited_once_with(VALID_NPUB, "tok", "get_account_numbers")
+        gate.assert_awaited_once_with(VALID_NPUB)
         restore_mock.assert_called_once_with(VALID_NPUB)
         assert result["error_code"] == "oauth_token_expired"
