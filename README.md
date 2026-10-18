@@ -185,9 +185,9 @@ These credentials are delivered via Secure Courier (see step 6), not set as envi
 
 Every Operator is sponsored by an Authority in the DPYC&trade; trust chain. The Authority certifies your purchase orders and collects a small fee (default 2%).
 
-1. Connect to your Authority's MCP service (e.g., [tollbooth-authority](https://github.com/lonniev/tollbooth-authority))
-2. Call `register_operator(npub=<your_operator_npub>)` -- creates your ledger entry
-3. The Authority approves your registration
+1. On your **own** Schwab MCP, call `request_adoption(authority_npub=<your Authority's npub>, service_url=<your MCP endpoint>)`, signing the request with your operator nsec (NIP-98; Pricing Studio does this for you)
+2. The Authority's owner approves it (`approve_operator_request`), which creates your ledger entry and provisions your Neon database
+3. `adoption_status(authority_npub=...)` on your MCP reads `provisioned` once it is done
 
 ### 5. For Operators -- Fund Your Certification Balance
 
@@ -207,7 +207,7 @@ Schwab Developer apps use `app_key` and `secret` as the vendor field names (thes
 
 The Secure Courier is a **human-in-the-loop** exchange: the operator consciously replies in their Nostr client. The relay is drained destructively after pickup -- messages are consumed, not left on the wire.
 
-1. Call `request_credential_channel(service="schwab-operator", recipient_npub=<operator_npub>)` -- a welcome DM arrives in your Nostr client ([Oxcart](https://github.com/nickkawai/Oxcart))
+1. Call `request_credential_channel(service="schwab-operator", sender_npub=<operator_npub>)` -- it returns a `nonce`, and a welcome DM arrives in your Nostr client ([Oxcart](https://github.com/nickkawai/Oxcart))
 2. In Oxcart, reply to the DM with:
    ```json
    {
@@ -218,7 +218,7 @@ The Secure Courier is a **human-in-the-loop** exchange: the operator consciously
      "secret": "YOUR_SCHWAB_SECRET"
    }
    ```
-3. Call `receive_credentials(sender_npub=<operator_npub>, service="schwab-operator")` -- credentials are validated (`btcpay_host`, `app_key`, and `secret` must all be present) and vaulted
+3. Call `receive_credentials(sender_npub=<operator_npub>, service="schwab-operator", nonce=<that nonce>)` -- credentials are validated (`btcpay_host`, `app_key`, and `secret` must all be present) and vaulted
 
 This is a one-time setup per deployment. Operator credentials are encrypted and stored in the NeonVault, persisting across server restarts.
 
