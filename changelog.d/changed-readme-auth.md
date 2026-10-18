@@ -1,0 +1,1 @@
+- The README teaches adoption by `request_adoption` on your own MCP (the Authority's owner approves), and the courier calls with `sender_npub` and the returned `nonce`.
