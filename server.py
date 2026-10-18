@@ -44,10 +44,10 @@ mcp = FastMCP(
         "2. **Operator setup** (one-time): The operator delivers Schwab API app "
         "credentials via Secure Courier with `service='schwab-operator'`:\n"
         '   - Call `request_credential_channel(service="schwab-operator", '
-        "recipient_npub=<operator_npub>)`\n"
+        "sender_npub=<operator_npub>)`\n"
         '   - Reply with JSON: `{"app_key": "...", "secret": "..."}`\n'
         "   - Call `receive_credentials(sender_npub=<operator_npub>, "
-        'service="schwab-operator", nonce=<session phrase from the welcome DM>)`'
+        'service="schwab-operator", nonce=<the nonce that request returned>)`'
         " — all three are required\n\n"
         "3. **Patron onboarding** (per-user):\n"
         "   - Call `begin_oauth(npub=<your_npub>)` to get an authorization URL\n"
