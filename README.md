@@ -26,7 +26,7 @@ Multi-tenant [MCP](https://modelcontextprotocol.io/) server exposing Charles Sch
 
 *Inspired by [The Phantom Tollbooth](https://en.wikipedia.org/wiki/The_Phantom_Tollbooth) by Norton Juster, illustrated by Jules Feiffer (1961).*
 
-**Version:** 0.12.2 &nbsp; ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
+![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
 
 ## The DPYC&trade; Economy
 
@@ -234,9 +234,7 @@ Your balance depletes as you call paid tools. Recharge anytime with another `pur
 
 ### 8. For Patrons -- Connect Your Schwab Account
 
-You need to authorize schwab-mcp to read your Schwab account. Choose one method:
-
-### Patron Onboarding
+You need to authorize schwab-mcp to read your Schwab account:
 
 1. Call `begin_oauth(npub=<your_npub>)` to get an authorization URL
 2. Open the URL in your browser and log in to Schwab
@@ -268,8 +266,8 @@ Free tools are always available:
 ## Security
 
 - **npub identity** -- All sessions are keyed by a Nostr public key. No email, no username, no password.
-- **kind-27235 Schnorr proof** -- Every paid tool call requires a cryptographic proof that the caller controls the claimed npub. Proofs are requested and delivered via Secure Courier with human-in-the-loop approval.
-- **Secure Courier** -- Credentials are exchanged over NIP-04 encrypted Nostr DMs. The relay is drained destructively after pickup; messages do not persist on the wire.
+- **Identity on the connection** -- Tools carry no proof argument. A client holding the nsec signs each HTTP request (NIP-98, kind 27235); an OAuth client proves the npub once into its connection with `request_npub_proof` / `receive_npub_proof`, which the patron approves in their Nostr client for a duration they choose (up to 30 days).
+- **Secure Courier** -- Credentials are exchanged over NIP-44 encrypted Nostr DMs. The relay is drained destructively after pickup; messages do not persist on the wire.
 - **NeonVault** -- Credentials (`token_json`) and ledger state are stored in Postgres with per-operator row isolation. No secrets in environment variables or chat history.
 - **Operator credential isolation** -- BTCPay and Schwab API credentials (`app_key`, `secret`) are delivered via Secure Courier with `service="schwab-operator"`, validated at receive time, and never exposed in logs or responses.
 
@@ -307,6 +305,11 @@ Free tools are always available:
 | [optionality-mcp](https://github.com/lonniev/optionality-mcp) | Options analytics (brokerage-data operator) |
 | [tollbooth-oauth2-collector](https://github.com/lonniev/tollbooth-oauth2-collector) | OAuth2 callback handler (advocate service) |
 | [tollbooth-shortlinks](https://github.com/lonniev/tollbooth-shortlinks) | URL shortener utility |
+| [goodearth-mcp](https://github.com/lonniev/goodearth-mcp) | Climate analytics for small specialty-crop farms |
+| [beesknees-mcp](https://github.com/lonniev/beesknees-mcp) | The Bee's Knees -- a monetized multiplayer race game |
+| [roastify-mcp](https://github.com/lonniev/roastify-mcp) | Roastify coffee catalog and packaging artwork |
+| [ChartRemotely-mcp](https://github.com/lonniev/ChartRemotely-mcp) | Puts a security on a desktop chart, by voice or tool call |
+| [tollbooth-web](https://github.com/lonniev/tollbooth-web) | Shared browser SDK for DPYC&trade; operator front ends |
 | [DPYC Whitepaper](https://github.com/lonniev/dpyc-community/blob/main/docs/WHITEPAPER.md) | Technical whitepaper for the Tollbooth architecture |
 | [The Phantom Tollbooth on the Lightning Turnpike](https://stablecoin.myshopify.com/blogs/our-value/the-phantom-tollbooth-on-the-lightning-turnpike) | Narrative introduction to Tollbooth DPYC&trade; |
 
@@ -317,10 +320,10 @@ Free tools are always available:
 schwab-mcp runs on [Horizon](https://www.fastmcp.cloud/). Any MCP client (Claude.ai, Claude Desktop, Cursor, your own agent) can connect:
 
 ```
-https://www.fastmcp.cloud/server/lonniev/schwab-mcp
+https://schwab-mcp.fastmcp.app/mcp
 ```
 
-Patron identity is established via the OAuth2 flow (`begin_oauth` / `check_oauth_status`) or Secure Courier. Sessions are keyed by npub.
+Patron identity is on the connection (a NIP-98 signed request, or an OAuth connection that holds the npub after `request_npub_proof` / `receive_npub_proof`). The Schwab account is linked separately with `begin_oauth` / `check_oauth_status`. Sessions are keyed by npub.
 
 ### Operator Environment Variables
 
@@ -330,16 +333,13 @@ Patron identity is established via the OAuth2 flow (`begin_oauth` / `check_oauth
 |----------|-------------|
 | `TOLLBOOTH_NOSTR_OPERATOR_NSEC` | Operator's Nostr secret key -- the single bootstrap key for identity, Secure Courier DMs, and audit signing |
 
-This is the only env var required to start. Certified operators bootstrap their Neon database URL from the Authority via encrypted Nostr DM -- `NEON_DATABASE_URL` is not read from the environment.
+This is the only env var required to start. Certified operators bootstrap their Neon database URL from the Authority via encrypted Nostr DM -- `NEON_DATABASE_URL` is not read from the environment. The relay set comes from the shared dpyc-community registry and tranche lifetime from the operator's pricing model -- neither is an env var.
 
 #### Optional Tuning
 
 | Variable | Description |
 |----------|-------------|
-| `TOLLBOOTH_NOSTR_RELAYS` | Comma-separated relay URLs (overrides defaults) |
 | `SCHWAB_TRADER_API` | API base URL (default `https://api.schwabapi.com`) |
-| `CREDIT_TTL_SECONDS` | Fallback tranche lifetime in seconds (default: 604800 = 7 days). Overridden by `tranche_lifetime.ttl_days` in the pricing model if set. |
-| `DPYC_REGISTRY_CACHE_TTL_SECONDS` | How long to cache the DPYC community registry (default: 300) |
 
 #### Credentials via Secure Courier (NOT env vars)
 
@@ -380,6 +380,7 @@ schwab-mcp/
     test_vault.py          # Session management
     test_account.py        # Position, balance, order, transaction parsing
     test_market.py         # Quote + price history formatting
+    test_oauth_flow.py     # OAuth2 state tokens and code exchange
     test_options.py        # Option chain filtering
 ```
 
