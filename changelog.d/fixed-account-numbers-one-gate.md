@@ -1,1 +1,0 @@
-- `get_account_numbers` proves its caller through the SDK's one gate, so a signed request or a holder connection reaches it (it checked an inline proof itself, bound to the bare tool name, which a grant could never satisfy).

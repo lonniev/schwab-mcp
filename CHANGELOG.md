@@ -5,6 +5,47 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Changes not yet released live in `changelog.d/`, one file per change — see the README there for why, and `scripts/changelog.py` for what folds them in at release time.
 
+## [0.14.0] — 2026-10-21
+
+### Added
+
+- Each spread row now carries the authoritative decision inputs derived from the underlying's **live equity quote** (reliable), not the option combo mark: `Underlying`, `ShortDist` (signed $ and %), and an `ITM`/`OTM`/`ATM` flag for the short leg. `get_positions` batch-fetches the underlyings via `get_quotes` in one call — no more second `get_stock_quote` and manual arithmetic per leg.
+- Relabeled the combo-mark column `Current` → `EstClose (mark×100)` so it can't be misread as an underlying price or dollar P&L. Schwab's combo mark is unreliable for deep-ITM spreads (prints below intrinsic), so this value is explicitly framed as an estimated cost-to-close, never an authoritative exit price.
+- The quote fetch is **best-effort**: any failure (auth, network, malformed payload) degrades the new columns to `Underlying: n/a` and never breaks the rest of the positions output.
+
+### Changed
+
+- `restore_oauth_session` now hands back an `OAuthSituation` carrying the
+  provider's own status and error code, not a bare string. `_resolution_for`
+  switches on `situation.code`, and the three Schwab-side literals
+  (`no_account_hash`, `operator_not_configured`, `no_credentials`) wrap at the
+  call site. Behaviour is unchanged for Schwab patrons except that OAuth
+  failures now carry evidence — and an `invalid_client` refusal of the
+  operator's own app credentials no longer reaches patrons as "your session
+  expired" with an invitation to re-authorize.
+
+- Connections authenticate as holders (tollbooth-dpyc 0.101.1 holder bearer): connecting from Claude.ai is an Authorization Code flow with no login page, each npub proven through a connection stays with it, and tool calls pass only `npub`.
+
+- Every Schwab tool carries a title and its behaviour (each reads, and reaches the Schwab API); `npub` and `dpop_token` use the fleet's shared descriptions; the server is named `schwab-mcp` and reports its own version, website and icon.
+
+- Pins tollbooth-dpyc 0.102.0: a request signed with an npub's own key (NIP-98) acts as that npub with no grant.
+
+- Pins tollbooth-dpyc 0.102.1: a request signed with an npub's own key (NIP-98) acts as that npub with no grant.
+
+- The README teaches adoption by `request_adoption` on your own MCP (the Authority's owner approves), and the courier calls with `sender_npub` and the returned `nonce`.
+
+- The README matches the code: the stale version line is dropped, the Security section describes identity on the connection (no per-call proof; patron-chosen lifetime up to 30 days) and NIP-44 courier DMs, the unread `TOLLBOOTH_NOSTR_RELAYS`/`CREDIT_TTL_SECONDS`/`DPYC_REGISTRY_CACHE_TTL_SECONDS` env vars are gone, the endpoint is `https://schwab-mcp.fastmcp.app/mcp`, and the ecosystem table names the newer operators.
+
+- Dependencies refreshed to current releases (mcp/fastmcp 1.26.0/3.4.7 → 2.3.0/4.1.0; frontend minor/patch). No service stays on old transitive versions.
+
+- Tools take only `npub`; the connection proves it (a request signed with the npub's key, or an OAuth connection that holds it after the DM). The `dpop_token` argument is gone, and the Courier phrase is `nonce`. Pins tollbooth-dpyc 0.103.0.
+
+### Fixed
+
+- `get_account_numbers` proves its caller through the SDK's one gate, so a signed request or a holder connection reaches it (it checked an inline proof itself, bound to the bare tool name, which a grant could never satisfy).
+
+- The server instructions name `request_credential_channel`'s real argument, `sender_npub`, and pass its `nonce` to `receive_credentials`.
+
 ## [0.13.6] — 2026-08-24
 
 ### Security — track tollbooth-dpyc 0.88.1 (cryptography floor raised to >=49.0.0)
