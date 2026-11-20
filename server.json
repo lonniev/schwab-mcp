@@ -1,7 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.lonniev/schwab-mcp",
+  "title": "Schwab",
   "description": "Multi-tenant FastMCP server for Charles Schwab brokerage data, monetized via DPYC Tollbooth",
+  "websiteUrl": "https://cafe.tollbooth-dpyc.com/products/schwab-mcp",
   "version": "0.14.0",
   "repository": {
     "url": "https://github.com/lonniev/schwab-mcp",
