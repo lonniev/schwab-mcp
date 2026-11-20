@@ -1,1 +1,0 @@
-- The MCP Registry listing carries a title (Schwab) and a link to https://cafe.tollbooth-dpyc.com/products/schwab-mcp.
