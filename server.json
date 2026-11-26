@@ -4,7 +4,7 @@
   "title": "Schwab",
   "description": "Multi-tenant FastMCP server for Charles Schwab brokerage data, monetized via DPYC Tollbooth",
   "websiteUrl": "https://cafe.tollbooth-dpyc.com/products/schwab-mcp",
-  "version": "0.14.2",
+  "version": "0.14.3",
   "repository": {
     "url": "https://github.com/lonniev/schwab-mcp",
     "source": "github"
